@@ -1,0 +1,57 @@
+{
+  
+"project": {
+"name": "Employee Tracker",
+"repository": "acme/employee-tracker",
+"owner": "HR Engineering",
+"team": ["alice", "bob", "charlie"],
+"startDate": "2026-02-01",
+"targetDate": "2026-07-15"
+},
+"currentPhase": {
+"name": "Development",
+"startedOn": "2026-03-10",
+"confidence": 84,
+"secondaryPhase": "Testing"
+},
+"milestones": [
+{ "name": "Requirements Sign-off", "status": "done", "date": "2026-02-20" },
+{ "name": "Architecture Review", "status": "done", "date": "2026-03-05" },
+{ "name": "Employee CRUD Module", "status": "done", "date": "2026-03-30" },
+{ "name": "Attendance Module", "status": "in-progress", "date": "2026-04-30" },
+{ "name": "Payroll Integration", "status": "pending", "date": "2026-05-20" },
+{ "name": "UAT Sign-off", "status": "pending", "date": "2026-06-20" },
+{ "name": "Production Release", "status": "pending", "date": "2026-07-10" }
+],
+"workItems": {
+"open": 19,
+"inProgress": 8,
+"done": 42,
+"blocked": 3
+},
+"risks": [
+{
+"id": "R1",
+"title": "Payroll API contract still unstable",
+"severity": "high",
+"status": "open"
+},
+{
+"id": "R2",
+"title": "Delayed UAT environment provisioning",
+"severity": "medium",
+"status": "open"
+}
+],
+"recentActivity": [
+"Completed employee profile page",
+"Added role-based access checks",
+"Optimized attendance batch import",
+"Fixed duplicate employee ID validation bug"
+],
+"nextActions": [
+"Finalize payroll API schema with finance team",
+"Complete attendance module QA",
+"Provision UAT environment and onboard test users"
+]
+}
