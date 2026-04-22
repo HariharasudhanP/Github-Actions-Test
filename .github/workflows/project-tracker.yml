@@ -1,0 +1,490 @@
+name: Basic Project Tracker
+
+on:
+  push:
+    branches:
+      - '**'
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        description: Branch to analyze (for example, main)
+        required: true
+        default: main
+      allowed_branches:
+        description: Comma-separated allowed branches (for example, main,develop,release/*)
+        required: false
+        default: main
+  schedule:
+    - cron: '0 2 * * 5'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: basic-project-tracker-${{ github.ref_name || inputs.target_branch || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  analyze-and-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Resolve branch configuration
+        id: branch_cfg
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          EVENT_NAME="${{ github.event_name }}"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            TARGET_BRANCH="${{ inputs.target_branch }}"
+            ALLOWED_RAW="${{ inputs.allowed_branches }}"
+          else
+            TARGET_BRANCH="${{ github.ref_name }}"
+            ALLOWED_RAW="${{ vars.PROJECT_TRACKER_ALLOWED_BRANCHES }}"
+          fi
+
+          if [ -z "${ALLOWED_RAW}" ]; then
+            ALLOWED_RAW="main"
+          fi
+
+          SHOULD_RUN="false"
+          IFS=',' read -ra BRANCH_PATTERNS <<< "$ALLOWED_RAW"
+          for pattern in "${BRANCH_PATTERNS[@]}"; do
+            trimmed="$(echo "$pattern" | xargs)"
+            if [ -n "$trimmed" ] && [[ "$TARGET_BRANCH" == $trimmed ]]; then
+              SHOULD_RUN="true"
+              break
+            fi
+          done
+
+          echo "target_branch=$TARGET_BRANCH" >> "$GITHUB_OUTPUT"
+          echo "allowed_branches=$ALLOWED_RAW" >> "$GITHUB_OUTPUT"
+          echo "should_run=$SHOULD_RUN" >> "$GITHUB_OUTPUT"
+
+      - name: Skip when branch is not allowed
+        if: ${{ steps.branch_cfg.outputs.should_run != 'true' }}
+        shell: bash
+        run: |
+          echo "### Basic Project Tracker" >> "$GITHUB_STEP_SUMMARY"
+          echo "Run skipped because branch is not allowed." >> "$GITHUB_STEP_SUMMARY"
+          echo "Current branch: ${{ steps.branch_cfg.outputs.target_branch }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Allowed branches: ${{ steps.branch_cfg.outputs.allowed_branches }}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Checkout selected branch
+        if: ${{ steps.branch_cfg.outputs.should_run == 'true' }}
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ steps.branch_cfg.outputs.target_branch }}
+
+      - name: Load prompt
+        if: ${{ steps.branch_cfg.outputs.should_run == 'true' }}
+        id: prompt
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROMPT_FILE=".github/prompts/basic-project-tracker.prompt.md"
+          if [ ! -f "$PROMPT_FILE" ]; then
+            echo "Prompt file not found at $PROMPT_FILE. Using empty prompt."
+            echo "PROMPT=" >> "$GITHUB_ENV"
+          else
+            {
+              echo "PROMPT<<EOF"
+              cat "$PROMPT_FILE"
+              echo "EOF"
+            } >> "$GITHUB_ENV"
+          fi
+
+      - name: Analyze codebase
+        if: ${{ steps.branch_cfg.outputs.should_run == 'true' }}
+        id: analysis
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BRANCH="${{ steps.branch_cfg.outputs.target_branch }}"
+          NOW_UTC="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y jq
+          fi
+
+          FILE_COUNT="$(git ls-files | wc -l | tr -d ' ')"
+          DIR_COUNT="$(find . -type d -not -path '*/.git/*' | wc -l | tr -d ' ')"
+          COMMIT_COUNT="$(git rev-list --count HEAD)"
+          COMMIT_LAST_30="$(git rev-list --count --since='30 days ago' HEAD)"
+          LOC_ADDED="$(git log --since='30 days ago' --pretty=tformat: --numstat | awk '{ add += $1 } END { print add + 0 }')"
+          LOC_DELETED="$(git log --since='30 days ago' --pretty=tformat: --numstat | awk '{ del += $2 } END { print del + 0 }')"
+
+          TOP_EXTENSIONS="$(git ls-files | awk -F. 'NF>1{print tolower($NF)}' | sort | uniq -c | sort -nr | head -8)"
+          TOP_ACTIVE_FILES="$(git log --since='30 days ago' --name-only --pretty=format: | sed '/^$/d' | sort | uniq -c | sort -nr | head -8)"
+
+          PROJECT_NAME="${GITHUB_REPOSITORY#*/}"
+          PROJECT_BRIEF="Repository-level project with active source and delivery artifacts."
+          if [ -f "README.md" ]; then
+            README_LINE="$(grep -m1 -E '^[[:space:]]*[^#[:space:]].+' README.md || true)"
+            if [ -n "$README_LINE" ]; then
+              PROJECT_BRIEF="$README_LINE"
+            fi
+          fi
+
+          PRIMARY_PHASE="Development"
+          PHASE_CONFIDENCE="72"
+          SECONDARY_PHASE="Testing"
+
+          if [ -f "deploy_report.json" ] || [ -f "deploy_report.txt" ]; then
+            PRIMARY_PHASE="Deployment"
+            PHASE_CONFIDENCE="82"
+            SECONDARY_PHASE="Testing"
+          elif [ -d "outputs/testing" ] || [ -d "tests" ] || [ -f "jest.config.js" ]; then
+            PRIMARY_PHASE="Testing"
+            PHASE_CONFIDENCE="78"
+            SECONDARY_PHASE="Development"
+          elif [ -d "outputs/architecture" ]; then
+            PRIMARY_PHASE="Architecture"
+            PHASE_CONFIDENCE="76"
+            SECONDARY_PHASE="Development"
+          elif [ -d "outputs/design" ]; then
+            PRIMARY_PHASE="Design"
+            PHASE_CONFIDENCE="74"
+            SECONDARY_PHASE="Architecture"
+          elif [ -d "outputs/requirements" ]; then
+            PRIMARY_PHASE="Requirements"
+            PHASE_CONFIDENCE="75"
+            SECONDARY_PHASE="Design"
+          fi
+
+          CODEBASE_EVIDENCE="Repository: ${GITHUB_REPOSITORY}\nBranch: ${BRANCH}\nTracked files: ${FILE_COUNT}\nDirectories: ${DIR_COUNT}\nTotal commits: ${COMMIT_COUNT}\nCommits (30d): ${COMMIT_LAST_30}\nLOC added (30d): ${LOC_ADDED}\nLOC deleted (30d): ${LOC_DELETED}\n\nTop file types:\n${TOP_EXTENSIONS}\n\nMost active files (30d):\n${TOP_ACTIVE_FILES}"
+
+          AI_REPORT=""
+          if [ -n "${OPENAI_API_KEY:-}" ] && [ -n "${PROMPT:-}" ]; then
+            AI_INPUT="Prompt:\n${PROMPT}\n\nCodebase Evidence:\n${CODEBASE_EVIDENCE}"
+            RESPONSE="$(curl --max-time 45 -sS https://api.openai.com/v1/responses -H "Content-Type: application/json" -H "Authorization: Bearer ${OPENAI_API_KEY}" -d "$(jq -n --arg input "$AI_INPUT" '{model:"gpt-4.1-mini", input:$input}')" || true)"
+            AI_REPORT="$(echo "$RESPONSE" | jq -r '.output_text // .output[0].content[0].text // empty' 2>/dev/null || true)"
+          fi
+
+          CODE_CHURN_30D="$((LOC_ADDED + LOC_DELETED))"
+          NET_LOC_CHANGE_30D="$((LOC_ADDED - LOC_DELETED))"
+          ACTIVITY_BAND="Moderate"
+          if [ "$COMMIT_LAST_30" -ge 40 ]; then
+            ACTIVITY_BAND="High"
+          elif [ "$COMMIT_LAST_30" -lt 10 ]; then
+            ACTIVITY_BAND="Low"
+          fi
+
+          mkdir -p tracker
+
+          {
+            echo "# Basic Project Tracker Report"
+            echo
+            echo "- Generated: ${NOW_UTC}"
+            echo "- Repository: ${GITHUB_REPOSITORY}"
+            echo "- Branch: ${BRANCH}"
+            echo "- Trigger: ${{ github.event_name }}"
+            echo "- Data source: Whole codebase"
+            echo
+          } > tracker/project-tracker-report.md
+
+          if [ -n "$AI_REPORT" ]; then
+            echo "$AI_REPORT" >> tracker/project-tracker-report.md
+            echo >> tracker/project-tracker-report.md
+          else
+            {
+              echo "Project Summary"
+              echo "- ${PROJECT_NAME} is the current project."
+              echo "- ${PROJECT_BRIEF}"
+              echo "- This report is generated from whole-codebase evidence."
+              echo "- Recent engineering activity indicates ${COMMIT_LAST_30} commits in the last 30 days."
+              echo "- Activity band is ${ACTIVITY_BAND} based on commit velocity and code churn (${CODE_CHURN_30D} lines touched in 30 days)."
+              echo "- Net code movement in the last 30 days is ${NET_LOC_CHANGE_30D} LOC (added minus deleted)."
+              echo
+              echo "Project Brief"
+              echo "- Repository focus: ${PROJECT_NAME}"
+              echo "- Scope summary: ${PROJECT_BRIEF}"
+              echo "- Delivery signal: ${COMMIT_COUNT} cumulative commits with ${COMMIT_LAST_30} recent commits indicate continuing active development."
+              echo "- Structural footprint: ${FILE_COUNT} tracked files across ${DIR_COUNT} directories."
+              echo
+              echo "Current Phase"
+              echo "- Primary phase: ${PRIMARY_PHASE}"
+              echo "- Confidence: ${PHASE_CONFIDENCE}%"
+              echo "- Secondary phase (if needed): ${SECONDARY_PHASE}"
+              echo "- Phase rationale: inferred from repository artifacts, folder structure, and deployment/testing evidence."
+              echo
+              echo "Progress Snapshot"
+              echo "- Completed:"
+              echo "  - Branch workflow and tracker automation are configured."
+              echo "  - Repository evidence is being scanned successfully."
+              echo "  - Reporting pipeline publishes summary, artifact, Teams update, and Jira sync hook."
+              echo "- In Progress:"
+              echo "  - Codebase changes continue across active files."
+              echo "  - Ongoing implementation and validation are inferred from commit activity."
+              echo "  - Incremental refinement of quality gates and delivery documentation is still active."
+              echo "- Pending:"
+              echo "  - Final phase closure depends on downstream validation and release checkpoints."
+              echo "  - Documentation alignment and risk sign-off remain open."
+              echo "  - Milestone-level acceptance checkpoints should be explicitly mapped to issue tracking status."
+              echo
+              echo "Key Risks or Blockers"
+              echo "- Medium: Activity concentrated in a small set of files can raise merge/regression risk."
+              echo "- Medium: Missing structured status metadata may reduce confidence in milestone-level reporting."
+              echo "- Medium: High code churn without linked acceptance evidence can delay release readiness decisions."
+              echo
+              echo "Evidence"
+              echo "- File: .github/workflows/project-tracker.yml | Why: Defines branch-scoped analysis and report generation."
+              echo "- File: .github/prompts/basic-project-tracker.prompt.md | Why: Defines the expected tracker output shape."
+              echo "- File: README.md | Why: Provides project context when available."
+              echo "- File: git history | Why: Provides trend and activity signals for current status."
+              echo "- Signal: top file-type and hot-file activity indicate where current implementation effort is concentrated."
+              echo
+              echo "Codebase Snapshot"
+              echo "- Total tracked files: ${FILE_COUNT}"
+              echo "- Total directories: ${DIR_COUNT}"
+              echo "- Total commits: ${COMMIT_COUNT}"
+              echo "- Commits in last 30 days: ${COMMIT_LAST_30} (${ACTIVITY_BAND} activity)"
+              echo "- LOC added (last 30 days): ${LOC_ADDED}"
+              echo "- LOC deleted (last 30 days): ${LOC_DELETED}"
+              echo "- Code churn (last 30 days): ${CODE_CHURN_30D}"
+              echo "- Net LOC change (last 30 days): ${NET_LOC_CHANGE_30D}"
+              echo
+              echo "Top File Types (last scan)"
+              echo "${TOP_EXTENSIONS}"
+              echo
+              echo "Most Active Files (30 days)"
+              echo "${TOP_ACTIVE_FILES}"
+              echo
+              echo "Next Actions"
+              echo "1. Review the most active files and confirm intended scope."
+              echo "2. Validate current phase deliverables against acceptance expectations."
+              echo "3. Update key docs and rerun tracker for the next checkpoint."
+              echo "4. Link top changed files to Jira items to improve release traceability."
+              echo
+            } >> tracker/project-tracker-report.md
+          fi
+
+          echo "report_path=tracker/project-tracker-report.md" >> "$GITHUB_OUTPUT"
+
+      - name: Publish report to workflow summary
+        if: ${{ steps.branch_cfg.outputs.should_run == 'true' }}
+        shell: bash
+        run: |
+          cat "${{ steps.analysis.outputs.report_path }}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report artifact
+        if: ${{ steps.branch_cfg.outputs.should_run == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: basic-project-tracker-${{ github.run_number }}
+          path: ${{ steps.analysis.outputs.report_path }}
+
+      - name: Send Teams notification
+        if: ${{ steps.branch_cfg.outputs.should_run == 'true' }}
+        env:
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "${TEAMS_WEBHOOK_URL:-}" ]; then
+            echo "TEAMS_WEBHOOK_URL is not configured. Skipping Teams notification."
+            exit 0
+          fi
+
+          REPORT_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          PAYLOAD="$(jq -n \
+            --arg title "Basic Project Tracker Report" \
+            --arg repo "${{ github.repository }}" \
+            --arg branch "${{ steps.branch_cfg.outputs.target_branch }}" \
+            --arg actor "${{ github.actor }}" \
+            --arg trigger "${{ github.event_name }}" \
+            --arg reportUrl "$REPORT_URL" \
+            '{
+              "@type": "MessageCard",
+              "@context": "https://schema.org/extensions",
+              summary: $title,
+              themeColor: "0078D7",
+              title: $title,
+              sections: [
+                {
+                  facts: [
+                    { name: "Repository", value: $repo },
+                    { name: "Branch", value: $branch },
+                    { name: "Triggered By", value: $actor },
+                    { name: "Trigger", value: $trigger }
+                  ],
+                  text: "The Basic Project Tracker workflow completed successfully."
+                }
+              ],
+              potentialAction: [
+                {
+                  "@type": "OpenUri",
+                  name: "View Run",
+                  targets: [
+                    { os: "default", uri: $reportUrl }
+                  ]
+                }
+              ]
+            }')"
+
+          curl --fail --show-error --silent \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            "$TEAMS_WEBHOOK_URL"
+
+      - name: Push summary to Jira Epic
+        if: ${{ steps.branch_cfg.outputs.should_run == 'true' }}
+        env:
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          JIRA_EPIC_KEY: ${{ secrets.JIRA_EPIC_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "${JIRA_BASE_URL:-}" ] || [ -z "${JIRA_USER_EMAIL:-}" ] || \
+             [ -z "${JIRA_API_TOKEN:-}" ] || [ -z "${JIRA_EPIC_KEY:-}" ]; then
+            echo "One or more Jira secrets are not configured. Skipping Jira comment."
+            exit 0
+          fi
+
+          JIRA_SITE_URL="${JIRA_BASE_URL%/}"
+          if [[ "$JIRA_SITE_URL" == */browse/* ]]; then
+            JIRA_SITE_URL="${JIRA_SITE_URL%%/browse/*}"
+          fi
+
+          RAW_EPIC_KEY="${JIRA_EPIC_KEY}"
+          NORMALIZED_EPIC_KEY="${RAW_EPIC_KEY##*/}"
+          NORMALIZED_EPIC_KEY="${NORMALIZED_EPIC_KEY%%\?*}"
+          NORMALIZED_EPIC_KEY="${NORMALIZED_EPIC_KEY%%#*}"
+          NORMALIZED_EPIC_KEY="$(echo "$NORMALIZED_EPIC_KEY" | xargs)"
+
+          if [ -z "$NORMALIZED_EPIC_KEY" ]; then
+            echo "JIRA_EPIC_KEY is empty after normalization."
+            exit 1
+          fi
+
+          if [[ "$NORMALIZED_EPIC_KEY" != *-* ]]; then
+            echo "JIRA_EPIC_KEY looks invalid: '$NORMALIZED_EPIC_KEY'. Expected format like ABC-123."
+            exit 1
+          fi
+
+          REPORT_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          REPORT_CONTENT="$(head -60 "${{ steps.analysis.outputs.report_path }}")"
+
+          MYSELF_URL="${JIRA_SITE_URL}/rest/api/3/myself"
+          MYSELF_BODY_FILE="$(mktemp)"
+          MYSELF_STATUS="$(curl -sS -o "$MYSELF_BODY_FILE" -w "%{http_code}" \
+            -u "${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}" \
+            -H "Accept: application/json" \
+            "$MYSELF_URL")"
+
+          if [ "$MYSELF_STATUS" -lt 200 ] || [ "$MYSELF_STATUS" -ge 300 ]; then
+            echo "Jira auth check failed with HTTP ${MYSELF_STATUS}."
+            echo "Auth URL: ${MYSELF_URL}"
+            echo "Response body:"
+            cat "$MYSELF_BODY_FILE"
+            exit 1
+          fi
+
+          AUTH_USER="$(jq -r '.emailAddress // .displayName // "unknown"' "$MYSELF_BODY_FILE" 2>/dev/null || echo "unknown")"
+          echo "Jira auth check passed for: ${AUTH_USER}"
+          echo "Using Jira issue key: ${NORMALIZED_EPIC_KEY}"
+
+          ISSUE_LOOKUP_URL="${JIRA_SITE_URL}/rest/api/3/issue/${NORMALIZED_EPIC_KEY}?fields=summary"
+          LOOKUP_BODY_FILE="$(mktemp)"
+          LOOKUP_STATUS="$(curl -sS -o "$LOOKUP_BODY_FILE" -w "%{http_code}" \
+            -u "${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}" \
+            -H "Accept: application/json" \
+            "$ISSUE_LOOKUP_URL")"
+
+          if [ "$LOOKUP_STATUS" -lt 200 ] || [ "$LOOKUP_STATUS" -ge 300 ]; then
+            echo "Jira issue lookup failed with HTTP ${LOOKUP_STATUS}."
+            echo "Lookup URL: ${ISSUE_LOOKUP_URL}"
+            echo "Response body:"
+            cat "$LOOKUP_BODY_FILE"
+            echo "Tip: confirm the API user can view issue ${NORMALIZED_EPIC_KEY} in Jira."
+            exit 1
+          fi
+
+          BODY_TEXT="$(printf 'Basic Project Tracker Report\n\nRepository: %s\nBranch: %s\nTriggered by: %s (%s)\nRun: %s\n\n{noformat}\n%s\n{noformat}\n' \
+            '${{ github.repository }}' \
+            '${{ steps.branch_cfg.outputs.target_branch }}' \
+            '${{ github.actor }}' \
+            '${{ github.event_name }}' \
+            "$REPORT_URL" \
+            "$REPORT_CONTENT")"
+
+          COMMENT_BODY="$(jq -n --arg body "$BODY_TEXT" '{ "body": $body }')"
+
+          COMMENT_URL="${JIRA_SITE_URL}/rest/api/2/issue/${NORMALIZED_EPIC_KEY}/comment"
+          COMMENT_RESPONSE_FILE="$(mktemp)"
+          HTTP_STATUS="$(curl -sS -o "$COMMENT_RESPONSE_FILE" -w "%{http_code}" \
+            -X POST \
+            -u "${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$COMMENT_BODY" \
+            "$COMMENT_URL")"
+
+          if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
+            echo "Jira comment posted to ${NORMALIZED_EPIC_KEY} (HTTP ${HTTP_STATUS})."
+          else
+            echo "Jira comment failed with HTTP ${HTTP_STATUS}."
+            echo "Comment URL: ${COMMENT_URL}"
+            echo "Response body:"
+            cat "$COMMENT_RESPONSE_FILE"
+            exit 1
+          fi
+
+          AUTH_USER="$(jq -r '.emailAddress // .displayName // "unknown"' "$MYSELF_BODY_FILE" 2>/dev/null || echo "unknown")"
+          echo "Jira auth check passed for: ${AUTH_USER}"
+          echo "Using Jira issue key: ${NORMALIZED_EPIC_KEY}"
+
+          ISSUE_LOOKUP_URL="${JIRA_SITE_URL}/rest/api/3/issue/${NORMALIZED_EPIC_KEY}?fields=summary"
+          LOOKUP_BODY_FILE="$(mktemp)"
+          LOOKUP_STATUS="$(curl -sS -o "$LOOKUP_BODY_FILE" -w "%{http_code}" \
+            -u "${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}" \
+            -H "Accept: application/json" \
+            "$ISSUE_LOOKUP_URL")"
+
+          if [ "$LOOKUP_STATUS" -lt 200 ] || [ "$LOOKUP_STATUS" -ge 300 ]; then
+            echo "Jira issue lookup failed with HTTP ${LOOKUP_STATUS}."
+            echo "Lookup URL: ${ISSUE_LOOKUP_URL}"
+            echo "Response body:"
+            cat "$LOOKUP_BODY_FILE"
+            echo "Tip: confirm the API user can view issue ${NORMALIZED_EPIC_KEY} in Jira."
+            exit 1
+          fi
+
+          BODY_TEXT="$(printf 'Basic Project Tracker Report\n\nRepository: %s\nBranch: %s\nTriggered by: %s (%s)\nRun: %s\n\n{noformat}\n%s\n{noformat}\n' \
+            '${{ github.repository }}' \
+            '${{ steps.branch_cfg.outputs.target_branch }}' \
+            '${{ github.actor }}' \
+            '${{ github.event_name }}' \
+            "$REPORT_URL" \
+            "$REPORT_CONTENT")"
+
+          COMMENT_BODY="$(jq -n --arg body "$BODY_TEXT" '{ "body": $body }')"
+
+          COMMENT_URL="${JIRA_SITE_URL}/rest/api/2/issue/${NORMALIZED_EPIC_KEY}/comment"
+          COMMENT_RESPONSE_FILE="$(mktemp)"
+          HTTP_STATUS="$(curl -sS -o "$COMMENT_RESPONSE_FILE" -w "%{http_code}" \
+            -X POST \
+            -u "${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$COMMENT_BODY" \
+            "$COMMENT_URL")"
+
+          if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
+            echo "Jira comment posted to ${NORMALIZED_EPIC_KEY} (HTTP ${HTTP_STATUS})."
+          else
+            echo "Jira comment failed with HTTP ${HTTP_STATUS}."
+            echo "Comment URL: ${COMMENT_URL}"
+            echo "Response body:"
+            cat "$COMMENT_RESPONSE_FILE"
+            exit 1
+          fi
