@@ -5,11 +5,6 @@ on:
     - cron: '0 6 * * *'
   workflow_dispatch:
     inputs:
-      publish_issue:
-        description: Publish the generated report as a GitHub issue
-        required: false
-        default: true
-        type: boolean
       hours_back:
         description: Number of hours to include for recent activity
         required: false
@@ -18,7 +13,6 @@ on:
 
 permissions:
   contents: read
-  issues: write
 
 jobs:
   issues-report:
@@ -217,7 +211,6 @@ jobs:
 
             core.setOutput('report_path', reportPath);
             core.setOutput('report_date', now.toISOString().slice(0, 10));
-            core.setOutput('report_body', reportBody.slice(0, 60000));
 
       - name: Upload markdown report artifact
         uses: actions/upload-artifact@v4
@@ -226,38 +219,5 @@ jobs:
           path: ${{ steps.report.outputs.report_path }}
           retention-days: 30
 
-      - name: Convert report to PDF
-        run: |
-          npm install -g md-to-pdf --silent
-          md-to-pdf "${{ steps.report.outputs.report_path }}" \
-            --pdf-options '{"format":"A4","margin":{"top":"20mm","bottom":"20mm","left":"18mm","right":"18mm"},"printBackground":true}' \
-            --puppeteer-args '{"args":["--no-sandbox","--disable-setuid-sandbox"]}'
-          PDF_PATH="${{ steps.report.outputs.report_path }}"
-          PDF_PATH="${PDF_PATH%.md}.pdf"
-          echo "PDF_PATH=$PDF_PATH" >> "$GITHUB_ENV"
-
-      - name: Upload PDF report artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: daily-issues-report-pdf-${{ steps.report.outputs.report_date }}
-          path: ${{ env.PDF_PATH }}
-          retention-days: 30
-
       - name: Publish report to run summary
         run: cat "${{ steps.report.outputs.report_path }}" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Create daily report issue
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.publish_issue }}
-        uses: actions/github-script@v7
-        env:
-          REPORT_DATE: ${{ steps.report.outputs.report_date }}
-          REPORT_BODY: ${{ steps.report.outputs.report_body }}
-        with:
-          script: |
-            const title = 'Daily Issues Report - ' + process.env.REPORT_DATE;
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title,
-              body: process.env.REPORT_BODY
-            });
