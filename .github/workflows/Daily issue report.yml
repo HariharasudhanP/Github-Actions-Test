@@ -219,11 +219,27 @@ jobs:
             core.setOutput('report_date', now.toISOString().slice(0, 10));
             core.setOutput('report_body', reportBody.slice(0, 60000));
 
-      - name: Upload report artifact
+      - name: Upload markdown report artifact
         uses: actions/upload-artifact@v4
         with:
           name: daily-issues-report-${{ steps.report.outputs.report_date }}
           path: ${{ steps.report.outputs.report_path }}
+          retention-days: 30
+
+      - name: Convert report to PDF
+        run: |
+          npm install -g md-to-pdf --silent
+          PDF_PATH="${{ steps.report.outputs.report_path }}"
+          PDF_PATH="${PDF_PATH%.md}.pdf"
+          md-to-pdf "${{ steps.report.outputs.report_path }}" --dest "$PDF_PATH" \
+            --pdf-options '{"format":"A4","margin":{"top":"20mm","bottom":"20mm","left":"18mm","right":"18mm"},"printBackground":true}'
+          echo "PDF_PATH=$PDF_PATH" >> "$GITHUB_ENV"
+
+      - name: Upload PDF report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-issues-report-pdf-${{ steps.report.outputs.report_date }}
+          path: ${{ env.PDF_PATH }}
           retention-days: 30
 
       - name: Publish report to run summary
