@@ -1,0 +1,278 @@
+name: Relevance Summary
+
+on:
+  workflow_dispatch:
+    inputs:
+      close_previous:
+        description: Close any previously created relevance summary issues before creating a new one
+        required: false
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  relevance-summary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Collect relevance-check responses and create summary issue
+        id: summary
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const repoOwner = context.repo.owner;
+            const repoName = context.repo.repo;
+            const now = new Date();
+            const RELEVANCE_COMMAND = '/relevance-check';
+            const SUMMARY_LABEL = 'relevance-summary';
+
+            const fmtDate = (d) => {
+              const dt = typeof d === 'string' ? new Date(d) : d;
+              return dt.toLocaleString('en-IN', {
+                timeZone: 'Asia/Kolkata', hour12: false,
+                year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit', second: '2-digit'
+              }) + ' IST';
+            };
+
+            // ── Ensure the summary label exists ────────────────────────────
+            try {
+              await github.rest.issues.getLabel({
+                owner: repoOwner, repo: repoName, name: SUMMARY_LABEL
+              });
+            } catch (e) {
+              if (e.status === 404) {
+                await github.rest.issues.createLabel({
+                  owner: repoOwner, repo: repoName,
+                  name: SUMMARY_LABEL,
+                  color: '0075ca',
+                  description: 'Auto-generated relevance summary issue'
+                });
+              }
+            }
+
+            // ── Optionally close previous summary issues ────────────────────
+            if (context.payload.inputs.close_previous === 'true') {
+              const prevIssues = await github.paginate(github.rest.issues.listForRepo, {
+                owner: repoOwner, repo: repoName,
+                state: 'open', labels: SUMMARY_LABEL, per_page: 100
+              });
+              for (const prev of prevIssues) {
+                await github.rest.issues.update({
+                  owner: repoOwner, repo: repoName,
+                  issue_number: prev.number, state: 'closed'
+                });
+                core.info(`Closed previous summary issue #${prev.number}`);
+              }
+            }
+
+            // ── Fetch all open issues (excluding PRs) ───────────────────────
+            const allOpenItemsRaw = await github.paginate(github.rest.issues.listForRepo, {
+              owner: repoOwner, repo: repoName,
+              state: 'open', per_page: 100
+            });
+
+            // ── Fetch all open pull requests ────────────────────────────────
+            const allOpenPRs = await github.paginate(github.rest.pulls.list, {
+              owner: repoOwner, repo: repoName,
+              state: 'open', per_page: 100
+            });
+
+            const openIssues = allOpenItemsRaw.filter((i) => !i.pull_request);
+
+            // ── Helper: fetch comments containing /relevance-check ──────────
+            const getRelevanceComments = async (issueNumber) => {
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner: repoOwner, repo: repoName,
+                issue_number: issueNumber, per_page: 100
+              });
+              return comments.filter((c) =>
+                c.body && c.body.toLowerCase().includes(RELEVANCE_COMMAND.toLowerCase())
+              );
+            };
+
+            // ── Collect issues with /relevance-check comments ───────────────
+            const issueEntries = [];
+            for (const issue of openIssues) {
+              const relComments = await getRelevanceComments(issue.number);
+              if (relComments.length === 0) continue;
+
+              const latestComment = relComments[relComments.length - 1];
+              const snippet = (latestComment.body || '')
+                .split('\n')
+                .map((l) => l.trim())
+                .filter(Boolean)
+                .join(' ')
+                .slice(0, 300);
+
+              issueEntries.push({
+                number: issue.number,
+                title: issue.title,
+                url: issue.html_url,
+                author: issue.user ? issue.user.login : 'unknown',
+                assignees: issue.assignees && issue.assignees.length > 0
+                  ? issue.assignees.map((a) => '@' + a.login).join(', ')
+                  : 'unassigned',
+                labels: issue.labels && issue.labels.length > 0
+                  ? issue.labels.map((l) => (typeof l === 'string' ? l : l.name)).join(', ')
+                  : '—',
+                updatedAt: issue.updated_at,
+                commentAuthor: latestComment.user ? latestComment.user.login : 'unknown',
+                commentUrl: latestComment.html_url,
+                commentDate: latestComment.created_at,
+                snippet,
+                totalResponses: relComments.length
+              });
+            }
+
+            // ── Collect PRs with /relevance-check comments ──────────────────
+            const prEntries = [];
+            for (const pr of allOpenPRs) {
+              const relComments = await getRelevanceComments(pr.number);
+              if (relComments.length === 0) continue;
+
+              const latestComment = relComments[relComments.length - 1];
+              const snippet = (latestComment.body || '')
+                .split('\n')
+                .map((l) => l.trim())
+                .filter(Boolean)
+                .join(' ')
+                .slice(0, 300);
+
+              prEntries.push({
+                number: pr.number,
+                title: pr.title,
+                url: pr.html_url,
+                author: pr.user ? pr.user.login : 'unknown',
+                assignees: pr.assignees && pr.assignees.length > 0
+                  ? pr.assignees.map((a) => '@' + a.login).join(', ')
+                  : 'unassigned',
+                labels: pr.labels && pr.labels.length > 0
+                  ? pr.labels.map((l) => (typeof l === 'string' ? l : l.name)).join(', ')
+                  : '—',
+                updatedAt: pr.updated_at,
+                draft: pr.draft,
+                commentAuthor: latestComment.user ? latestComment.user.login : 'unknown',
+                commentUrl: latestComment.html_url,
+                commentDate: latestComment.created_at,
+                snippet,
+                totalResponses: relComments.length
+              });
+            }
+
+            core.info(`Found ${issueEntries.length} issue(s) and ${prEntries.length} PR(s) with ${RELEVANCE_COMMAND}`);
+
+            // ── Build the summary markdown body ─────────────────────────────
+            const lines = [];
+            lines.push(`# 🔍 Relevance Summary`);
+            lines.push('');
+            lines.push(`🕒 **Generated at:** ${fmtDate(now)}`);
+            lines.push(`📦 **Repository:** ${repoOwner}/${repoName}`);
+            lines.push(`🔎 **Trigger:** \`${RELEVANCE_COMMAND}\``);
+            lines.push('');
+            lines.push('---');
+            lines.push('');
+            lines.push('## 📊 Overview');
+            lines.push('');
+            lines.push('| Type | With `/relevance-check` | Total Open |');
+            lines.push('|---|---:|---:|');
+            lines.push(`| 🐞 Issues | **${issueEntries.length}** | ${openIssues.length} |`);
+            lines.push(`| 🔀 Pull Requests | **${prEntries.length}** | ${allOpenPRs.length} |`);
+            lines.push('');
+            lines.push('---');
+            lines.push('');
+
+            // ── Issues section ───────────────────────────────────────────────
+            lines.push('## 🐞 Issues with `/relevance-check` Response');
+            lines.push('');
+            if (issueEntries.length === 0) {
+              lines.push('> _No open issues contain a `/relevance-check` response._');
+            } else {
+              for (const entry of issueEntries) {
+                lines.push(`### [#${entry.number}](${entry.url}) — ${entry.title}`);
+                lines.push('');
+                lines.push(`| Field | Value |`);
+                lines.push(`|---|---|`);
+                lines.push(`| **Author** | @${entry.author} |`);
+                lines.push(`| **Assignees** | ${entry.assignees} |`);
+                lines.push(`| **Labels** | ${entry.labels} |`);
+                lines.push(`| **Last updated** | ${fmtDate(entry.updatedAt)} |`);
+                lines.push(`| **Relevance responses** | ${entry.totalResponses} |`);
+                lines.push(`| **Latest response by** | @${entry.commentAuthor} on ${fmtDate(entry.commentDate)} |`);
+                lines.push('');
+                lines.push(`<details><summary>💬 Latest <code>/relevance-check</code> response snippet</summary>`);
+                lines.push('');
+                lines.push(`> ${entry.snippet}`);
+                lines.push('');
+                lines.push(`[View comment](${entry.commentUrl})`);
+                lines.push('</details>');
+                lines.push('');
+              }
+            }
+
+            lines.push('---');
+            lines.push('');
+
+            // ── PRs section ──────────────────────────────────────────────────
+            lines.push('## 🔀 Pull Requests with `/relevance-check` Response');
+            lines.push('');
+            if (prEntries.length === 0) {
+              lines.push('> _No open pull requests contain a `/relevance-check` response._');
+            } else {
+              for (const entry of prEntries) {
+                const draftBadge = entry.draft ? ' *(draft)*' : '';
+                lines.push(`### [#${entry.number}](${entry.url}) — ${entry.title}${draftBadge}`);
+                lines.push('');
+                lines.push(`| Field | Value |`);
+                lines.push(`|---|---|`);
+                lines.push(`| **Author** | @${entry.author} |`);
+                lines.push(`| **Assignees** | ${entry.assignees} |`);
+                lines.push(`| **Labels** | ${entry.labels} |`);
+                lines.push(`| **Last updated** | ${fmtDate(entry.updatedAt)} |`);
+                lines.push(`| **Relevance responses** | ${entry.totalResponses} |`);
+                lines.push(`| **Latest response by** | @${entry.commentAuthor} on ${fmtDate(entry.commentDate)} |`);
+                lines.push('');
+                lines.push(`<details><summary>💬 Latest <code>/relevance-check</code> response snippet</summary>`);
+                lines.push('');
+                lines.push(`> ${entry.snippet}`);
+                lines.push('');
+                lines.push(`[View comment](${entry.commentUrl})`);
+                lines.push('</details>');
+                lines.push('');
+              }
+            }
+
+            lines.push('---');
+            lines.push('');
+            lines.push('> _This issue was auto-generated by the **Relevance Summary** workflow._');
+
+            const issueBody = lines.join('\n');
+
+            // ── Create the summary issue ─────────────────────────────────────
+            const summaryTitle = `[Relevance Summary] ${now.toISOString().slice(0, 10)} — ${issueEntries.length} issue(s), ${prEntries.length} PR(s) with /relevance-check`;
+
+            const created = await github.rest.issues.create({
+              owner: repoOwner,
+              repo: repoName,
+              title: summaryTitle,
+              body: issueBody,
+              labels: [SUMMARY_LABEL]
+            });
+
+            core.info(`Created summary issue #${created.data.number}: ${created.data.html_url}`);
+            core.setOutput('summary_issue_number', created.data.number);
+            core.setOutput('summary_issue_url', created.data.html_url);
+
+      - name: Print summary issue link
+        run: |
+          echo "### Relevance Summary Issue Created" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Issue **#${{ steps.summary.outputs.summary_issue_number }}**: ${{ steps.summary.outputs.summary_issue_url }}" >> "$GITHUB_STEP_SUMMARY"
