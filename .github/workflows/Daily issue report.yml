@@ -230,7 +230,8 @@ jobs:
         run: |
           npm install -g md-to-pdf --silent
           md-to-pdf "${{ steps.report.outputs.report_path }}" \
-            --pdf-options '{"format":"A4","margin":{"top":"20mm","bottom":"20mm","left":"18mm","right":"18mm"},"printBackground":true}'
+            --pdf-options '{"format":"A4","margin":{"top":"20mm","bottom":"20mm","left":"18mm","right":"18mm"},"printBackground":true}' \
+            --puppeteer-args '{"args":["--no-sandbox","--disable-setuid-sandbox"]}'
           PDF_PATH="${{ steps.report.outputs.report_path }}"
           PDF_PATH="${PDF_PATH%.md}.pdf"
           echo "PDF_PATH=$PDF_PATH" >> "$GITHUB_ENV"
