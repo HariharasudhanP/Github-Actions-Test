@@ -121,60 +121,80 @@ jobs:
               return `- [Issue #${comment.issue_url.split('/').pop()} comment](${comment.html_url}) by @${comment.user.login} at ${comment.created_at}: ${snippet || '[no text]'}`;
             };
 
+
             const lines = [];
-            lines.push(`# Daily Issues Report for ${repoOwner}/${repoName}`);
+            lines.push(`# 📊 Daily Issues Report for **${repoOwner}/${repoName}**`);
             lines.push('');
-            lines.push(`Generated at: ${now.toISOString()} (UTC)`);
-            lines.push(`Activity window: last ${hoursBack} hours (since ${sinceDate.toISOString()})`);
+            lines.push(`🕒 **Generated at:** ${now.toISOString()} (UTC)`);
+            lines.push(`🗓️ **Activity window:** last **${hoursBack} hours** (since ${sinceDate.toISOString()})`);
             lines.push('');
-            lines.push('## Open Issues Snapshot');
-            lines.push(`- Total open issues: ${openIssues.length}`);
-            lines.push(`- Unassigned open issues: ${unassignedCount}`);
-            lines.push(`- Stale open issues (no update in 14+ days): ${staleOpenCount}`);
+            lines.push('---');
+            lines.push('');
+            lines.push(`## 🐞 Open Issues Snapshot`);
+            lines.push('');
+            lines.push(`| 📝 Stat | 🔢 Count |`);
+            lines.push(`|---|---:|`);
+            lines.push(`| Total open issues | **${openIssues.length}** |`);
+            lines.push(`| Unassigned open issues | **${unassignedCount}** |`);
+            lines.push(`| Stale open issues (14+ days) | **${staleOpenCount}** |`);
             lines.push('');
 
-            lines.push('### Top labels on open issues');
+            lines.push('## 🏷️ Top Labels on Open Issues');
             if (topLabels.length === 0) {
-              lines.push('- No labels found on open issues');
+              lines.push('> _No labels found on open issues_');
             } else {
+              lines.push('| Label | Count |');
+              lines.push('|---|---:|');
               for (const [label, count] of topLabels) {
-                lines.push(`- ${label}: ${count}`);
+                lines.push(`| \\`${label}\\` | ${count} |`);
               }
             }
             lines.push('');
 
-            lines.push('### Oldest open issues');
+            lines.push('<details><summary>🔎 <strong>Oldest Open Issues</strong></summary>');
+            lines.push('');
             if (oldestOpenIssues.length === 0) {
-              lines.push('- No open issues');
+              lines.push('_No open issues_');
             } else {
+              lines.push('| Issue | Title | Assignees | Created | Last Updated |');
+              lines.push('|---|---|---|---|---|');
               for (const issue of oldestOpenIssues) {
-                lines.push(formatIssue(issue));
+                const assignees = issue.assignees && issue.assignees.length > 0
+                  ? issue.assignees.map((a) => `@${a.login}`).join(', ')
+                  : 'unassigned';
+                lines.push(`| [#${issue.number}](${issue.html_url}) | ${issue.title.replace(/\|/g, ' ')} | ${assignees} | ${issue.created_at.slice(0,10)} | ${issue.updated_at.slice(0,10)} |`);
               }
             }
+            lines.push('</details>');
             lines.push('');
 
-            lines.push(`## Recent Issue Activity (${hoursBack}h)`);
-            lines.push('### Recently updated issues');
+            lines.push(`## 🕵️‍♂️ Recent Issue Activity (last ${hoursBack}h)`);
+            lines.push('');
+            lines.push('<details><summary>📝 <strong>Recently Updated Issues</strong></summary>');
+            lines.push('');
             if (recentIssueUpdates.length === 0) {
-              lines.push('- No issue updates in this window');
+              lines.push('_No issue updates in this window_');
             } else {
               for (const issue of recentIssueUpdates) {
                 lines.push(formatIssue(issue));
               }
             }
+            lines.push('</details>');
             lines.push('');
 
-            lines.push('### Recent issue comments');
+            lines.push('<details><summary>💬 <strong>Recent Issue Comments</strong></summary>');
+            lines.push('');
             if (recentIssueComments.length === 0) {
-              lines.push('- No issue comments in this window');
+              lines.push('_No issue comments in this window_');
             } else {
               for (const comment of recentIssueComments) {
                 lines.push(formatComment(comment));
               }
             }
+            lines.push('</details>');
             lines.push('');
             lines.push('---');
-            lines.push('This report was generated automatically by the Daily Issues Report workflow.');
+            lines.push('> _This report was generated automatically by the **Daily Issues Report** workflow._');
 
             const reportBody = lines.join('\n');
             const reportPath = `${process.env.RUNNER_TEMP}/daily-issues-report.md`;
