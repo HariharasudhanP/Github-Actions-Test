@@ -110,12 +110,19 @@ jobs:
 
             const tick = '`';
 
+            const fmtDate = (d) => {
+              const dt = typeof d === 'string' ? new Date(d) : d;
+              return dt.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false,
+                year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' IST';
+            };
+
             const formatIssue = (issue) => {
               const assignees = issue.assignees && issue.assignees.length > 0
                 ? issue.assignees.map((a) => '@' + a.login).join(', ')
                 : 'unassigned';
               return '- [#' + issue.number + '](' + issue.html_url + ') ' + issue.title +
-                ' (assignees: ' + assignees + ', updated: ' + issue.updated_at + ')';
+                ' (assignees: ' + assignees + ', updated: ' + fmtDate(issue.updated_at) + ')';
             };
 
             const formatComment = (comment) => {
@@ -123,15 +130,15 @@ jobs:
               const snippet = body.length > 140 ? body.slice(0, 137) + '...' : body;
               const issueNum = comment.issue_url.split('/').pop();
               return '- [Issue #' + issueNum + ' comment](' + comment.html_url + ')' +
-                ' by @' + comment.user.login + ' at ' + comment.created_at + ': ' +
+                ' by @' + comment.user.login + ' at ' + fmtDate(comment.created_at) + ': ' +
                 (snippet || '[no text]');
             };
 
             const lines = [];
             lines.push('# 📊 Daily Issues Report for **' + repoOwner + '/' + repoName + '**');
             lines.push('');
-            lines.push('🕒 **Generated at:** ' + now.toISOString() + ' (UTC)');
-            lines.push('🗓️ **Activity window:** last **' + hoursBack + ' hours** (since ' + sinceDate.toISOString() + ')');
+            lines.push('🕒 **Generated at:** ' + fmtDate(now));
+            lines.push('🗓️ **Activity window:** last **' + hoursBack + ' hours** (since ' + fmtDate(sinceDate) + ')');
             lines.push('');
             lines.push('---');
             lines.push('');
