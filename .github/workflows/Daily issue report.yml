@@ -229,10 +229,10 @@ jobs:
       - name: Convert report to PDF
         run: |
           npm install -g md-to-pdf --silent
+          md-to-pdf "${{ steps.report.outputs.report_path }}" \
+            --pdf-options '{"format":"A4","margin":{"top":"20mm","bottom":"20mm","left":"18mm","right":"18mm"},"printBackground":true}'
           PDF_PATH="${{ steps.report.outputs.report_path }}"
           PDF_PATH="${PDF_PATH%.md}.pdf"
-          md-to-pdf "${{ steps.report.outputs.report_path }}" --dest "$PDF_PATH" \
-            --pdf-options '{"format":"A4","margin":{"top":"20mm","bottom":"20mm","left":"18mm","right":"18mm"},"printBackground":true}'
           echo "PDF_PATH=$PDF_PATH" >> "$GITHUB_ENV"
 
       - name: Upload PDF report artifact
