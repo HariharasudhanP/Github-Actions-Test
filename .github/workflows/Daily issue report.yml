@@ -146,7 +146,7 @@ jobs:
               lines.push('| Label | Count |');
               lines.push('|---|---:|');
               for (const [label, count] of topLabels) {
-                lines.push(`| \\`${label}\\` | ${count} |`);
+                lines.push(`| \\`${label}\` | ${count} |`);
               }
             }
             lines.push('');
@@ -228,4 +228,4 @@ jobs:
               repo: context.repo.repo,
               title,
               body: process.env.REPORT_BODY
-            }); 
+            });
