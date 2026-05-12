@@ -108,35 +108,40 @@ jobs:
             const recentIssueUpdates = recentlyUpdatedIssues.slice(0, 20);
             const recentIssueComments = recentComments.slice(0, 20);
 
+            const tick = '`';
+
             const formatIssue = (issue) => {
               const assignees = issue.assignees && issue.assignees.length > 0
-                ? issue.assignees.map((a) => `@${a.login}`).join(', ')
+                ? issue.assignees.map((a) => '@' + a.login).join(', ')
                 : 'unassigned';
-              return `- [#${issue.number}](${issue.html_url}) ${issue.title} (assignees: ${assignees}, updated: ${issue.updated_at})`;
+              return '- [#' + issue.number + '](' + issue.html_url + ') ' + issue.title +
+                ' (assignees: ' + assignees + ', updated: ' + issue.updated_at + ')';
             };
 
             const formatComment = (comment) => {
               const body = (comment.body || '').replace(/\s+/g, ' ').trim();
-              const snippet = body.length > 140 ? `${body.slice(0, 137)}...` : body;
-              return `- [Issue #${comment.issue_url.split('/').pop()} comment](${comment.html_url}) by @${comment.user.login} at ${comment.created_at}: ${snippet || '[no text]'}`;
+              const snippet = body.length > 140 ? body.slice(0, 137) + '...' : body;
+              const issueNum = comment.issue_url.split('/').pop();
+              return '- [Issue #' + issueNum + ' comment](' + comment.html_url + ')' +
+                ' by @' + comment.user.login + ' at ' + comment.created_at + ': ' +
+                (snippet || '[no text]');
             };
 
-
             const lines = [];
-            lines.push(`# 📊 Daily Issues Report for **${repoOwner}/${repoName}**`);
+            lines.push('# 📊 Daily Issues Report for **' + repoOwner + '/' + repoName + '**');
             lines.push('');
-            lines.push(`🕒 **Generated at:** ${now.toISOString()} (UTC)`);
-            lines.push(`🗓️ **Activity window:** last **${hoursBack} hours** (since ${sinceDate.toISOString()})`);
+            lines.push('🕒 **Generated at:** ' + now.toISOString() + ' (UTC)');
+            lines.push('🗓️ **Activity window:** last **' + hoursBack + ' hours** (since ' + sinceDate.toISOString() + ')');
             lines.push('');
             lines.push('---');
             lines.push('');
-            lines.push(`## 🐞 Open Issues Snapshot`);
+            lines.push('## 🐞 Open Issues Snapshot');
             lines.push('');
-            lines.push(`| 📝 Stat | 🔢 Count |`);
-            lines.push(`|---|---:|`);
-            lines.push(`| Total open issues | **${openIssues.length}** |`);
-            lines.push(`| Unassigned open issues | **${unassignedCount}** |`);
-            lines.push(`| Stale open issues (14+ days) | **${staleOpenCount}** |`);
+            lines.push('| 📝 Stat | 🔢 Count |');
+            lines.push('|---|---:|');
+            lines.push('| Total open issues | **' + openIssues.length + '** |');
+            lines.push('| Unassigned open issues | **' + unassignedCount + '** |');
+            lines.push('| Stale open issues (14+ days) | **' + staleOpenCount + '** |');
             lines.push('');
 
             lines.push('## 🏷️ Top Labels on Open Issues');
@@ -146,7 +151,7 @@ jobs:
               lines.push('| Label | Count |');
               lines.push('|---|---:|');
               for (const [label, count] of topLabels) {
-                lines.push(`| \\`${label}\` | ${count} |`);
+                lines.push('| ' + tick + label + tick + ' | ' + count + ' |');
               }
             }
             lines.push('');
@@ -160,15 +165,18 @@ jobs:
               lines.push('|---|---|---|---|---|');
               for (const issue of oldestOpenIssues) {
                 const assignees = issue.assignees && issue.assignees.length > 0
-                  ? issue.assignees.map((a) => `@${a.login}`).join(', ')
+                  ? issue.assignees.map((a) => '@' + a.login).join(', ')
                   : 'unassigned';
-                lines.push(`| [#${issue.number}](${issue.html_url}) | ${issue.title.replace(/\|/g, ' ')} | ${assignees} | ${issue.created_at.slice(0,10)} | ${issue.updated_at.slice(0,10)} |`);
+                const safeTitle = issue.title.replace(/\|/g, ' ');
+                lines.push('| [#' + issue.number + '](' + issue.html_url + ') | ' + safeTitle +
+                  ' | ' + assignees + ' | ' + issue.created_at.slice(0, 10) +
+                  ' | ' + issue.updated_at.slice(0, 10) + ' |');
               }
             }
             lines.push('</details>');
             lines.push('');
 
-            lines.push(`## 🕵️‍♂️ Recent Issue Activity (last ${hoursBack}h)`);
+            lines.push('## 🕵️ Recent Issue Activity (last ' + hoursBack + 'h)');
             lines.push('');
             lines.push('<details><summary>📝 <strong>Recently Updated Issues</strong></summary>');
             lines.push('');
@@ -197,7 +205,7 @@ jobs:
             lines.push('> _This report was generated automatically by the **Daily Issues Report** workflow._');
 
             const reportBody = lines.join('\n');
-            const reportPath = `${process.env.RUNNER_TEMP}/daily-issues-report.md`;
+            const reportPath = process.env.RUNNER_TEMP + '/daily-issues-report.md';
             fs.writeFileSync(reportPath, reportBody, 'utf8');
 
             core.setOutput('report_path', reportPath);
@@ -222,7 +230,7 @@ jobs:
           REPORT_BODY: ${{ steps.report.outputs.report_body }}
         with:
           script: |
-            const title = `Daily Issues Report - ${process.env.REPORT_DATE}`;
+            const title = 'Daily Issues Report - ' + process.env.REPORT_DATE;
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
