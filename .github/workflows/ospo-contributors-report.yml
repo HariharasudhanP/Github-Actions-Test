@@ -159,6 +159,8 @@ jobs:
             };
 
             const actorMap = new Map();
+            const repoActivityMap = new Map();
+
             const ensureActor = (login) => {
               if (!actorMap.has(login)) {
                 actorMap.set(login, {
@@ -171,6 +173,20 @@ jobs:
                 });
               }
               return actorMap.get(login);
+            };
+
+            const ensureRepoActivity = (repo) => {
+              if (!repo) return null;
+              if (!repoActivityMap.has(repo)) {
+                repoActivityMap.set(repo, {
+                  repo,
+                  commits: 0,
+                  prsOpened: 0,
+                  prsMerged: 0,
+                  issuesOpened: 0
+                });
+              }
+              return repoActivityMap.get(repo);
             };
 
             const isBotLogin = (login) => /\[bot\]$/.test(login) || /bot/i.test(login);
@@ -193,7 +209,12 @@ jobs:
               if (!includeBots && isBotLogin(login)) continue;
               const actor = ensureActor(login);
               actor.commits += 1;
-              if (item.repository?.full_name) actor.repos.add(item.repository.full_name);
+              if (item.repository?.full_name) {
+                const repo = item.repository.full_name;
+                actor.repos.add(repo);
+                const repoActivity = ensureRepoActivity(repo);
+                repoActivity.commits += 1;
+              }
             }
 
             core.info('Fetching opened PRs...');
@@ -204,7 +225,11 @@ jobs:
               const actor = ensureActor(login);
               actor.prsOpened += 1;
               const repo = extractRepo(item.repository_url);
-              if (repo) actor.repos.add(repo);
+              if (repo) {
+                actor.repos.add(repo);
+                const repoActivity = ensureRepoActivity(repo);
+                repoActivity.prsOpened += 1;
+              }
             }
 
             core.info('Fetching merged PRs...');
@@ -215,7 +240,11 @@ jobs:
               const actor = ensureActor(login);
               actor.prsMerged += 1;
               const repo = extractRepo(item.repository_url);
-              if (repo) actor.repos.add(repo);
+              if (repo) {
+                actor.repos.add(repo);
+                const repoActivity = ensureRepoActivity(repo);
+                repoActivity.prsMerged += 1;
+              }
             }
 
             core.info('Fetching opened issues...');
@@ -226,7 +255,11 @@ jobs:
               const actor = ensureActor(login);
               actor.issuesOpened += 1;
               const repo = extractRepo(item.repository_url);
-              if (repo) actor.repos.add(repo);
+              if (repo) {
+                actor.repos.add(repo);
+                const repoActivity = ensureRepoActivity(repo);
+                repoActivity.issuesOpened += 1;
+              }
             }
 
             const contributors = Array.from(actorMap.values()).map((a) => {
@@ -251,6 +284,25 @@ jobs:
             const repoSet = new Set();
             filtered.forEach((c) => c.repositories.forEach((r) => repoSet.add(r)));
 
+            const totalCommits = filtered.reduce((sum, c) => sum + c.commits, 0);
+            const totalPrsOpened = filtered.reduce((sum, c) => sum + c.prs_opened, 0);
+            const totalPrsMerged = filtered.reduce((sum, c) => sum + c.prs_merged, 0);
+            const totalIssuesOpened = filtered.reduce((sum, c) => sum + c.issues_opened, 0);
+            const totalActivityScore = filtered.reduce((sum, c) => sum + c.activity_score, 0);
+            const avgScore = filtered.length > 0 ? (totalActivityScore / filtered.length).toFixed(2) : '0.00';
+
+            const topRepos = Array.from(repoActivityMap.values())
+              .map((r) => ({
+                repo: r.repo,
+                commits: r.commits,
+                prs_opened: r.prsOpened,
+                prs_merged: r.prsMerged,
+                issues_opened: r.issuesOpened,
+                activity_score: (r.commits * 1) + (r.prsOpened * 2) + (r.prsMerged * 3) + (r.issuesOpened * 1)
+              }))
+              .sort((a, b) => b.activity_score - a.activity_score || a.repo.localeCompare(b.repo))
+              .slice(0, 10);
+
             const truncationNotes = [];
             if (commitsRes.truncated) truncationNotes.push(`Commit search truncated (${commitsRes.items.length}/${commitsRes.totalCount}).`);
             if (prsOpenedRes.truncated) truncationNotes.push(`Opened PR search truncated (${prsOpenedRes.items.length}/${prsOpenedRes.totalCount}).`);
@@ -260,11 +312,27 @@ jobs:
             const lines = [];
             lines.push(`# OSPO Contributors Report`);
             lines.push('');
+            lines.push(`> Monthly contributor activity view for **${org}**`);
+            lines.push('');
             lines.push(`- Organization: ${org}`);
             lines.push(`- Reporting month: ${monthKey}`);
             lines.push(`- Window (UTC): ${fmtDateUtc(start)} to ${fmtDateUtc(end)} (end-exclusive)`);
             lines.push(`- Included contributors: ${filtered.length}`);
             lines.push(`- Repositories touched: ${repoSet.size}`);
+            lines.push('');
+
+            lines.push('## Executive Snapshot');
+            lines.push('');
+            lines.push('| Metric | Value |');
+            lines.push('|---|---:|');
+            lines.push(`| Contributors | **${filtered.length}** |`);
+            lines.push(`| Repositories touched | **${repoSet.size}** |`);
+            lines.push(`| Commits | **${totalCommits}** |`);
+            lines.push(`| PRs opened | **${totalPrsOpened}** |`);
+            lines.push(`| PRs merged | **${totalPrsMerged}** |`);
+            lines.push(`| Issues opened | **${totalIssuesOpened}** |`);
+            lines.push(`| Total activity score | **${totalActivityScore}** |`);
+            lines.push(`| Average score per contributor | **${avgScore}** |`);
             lines.push('');
 
             if (truncationNotes.length > 0) {
@@ -276,14 +344,54 @@ jobs:
 
             lines.push(`## Top ${top.length} Contributors`);
             lines.push('');
-            lines.push('| Contributor | Commits | PRs Opened | PRs Merged | Issues Opened | Repos | Score |');
-            lines.push('|---|---:|---:|---:|---:|---:|---:|');
-            for (const c of top) {
-              lines.push(`| @${c.login} | ${c.commits} | ${c.prs_opened} | ${c.prs_merged} | ${c.issues_opened} | ${c.repos_touched} | ${c.activity_score} |`);
+            lines.push('| Rank | Contributor | Commits | PRs Opened | PRs Merged | Issues Opened | Repos | Score |');
+            lines.push('|---:|---|---:|---:|---:|---:|---:|---:|');
+            for (let i = 0; i < top.length; i++) {
+              const c = top[i];
+              const rank = i + 1;
+              lines.push(`| ${rank} | @${c.login} | ${c.commits} | ${c.prs_opened} | ${c.prs_merged} | ${c.issues_opened} | ${c.repos_touched} | **${c.activity_score}** |`);
             }
             if (top.length === 0) {
-              lines.push('| _No contributors matched filters_ | 0 | 0 | 0 | 0 | 0 | 0 |');
+              lines.push('| 0 | _No contributors matched filters_ | 0 | 0 | 0 | 0 | 0 | 0 |');
             }
+
+            lines.push('');
+            lines.push('## Top Active Repositories');
+            lines.push('');
+            lines.push('| Rank | Repository | Commits | PRs Opened | PRs Merged | Issues Opened | Score |');
+            lines.push('|---:|---|---:|---:|---:|---:|---:|');
+            for (let i = 0; i < topRepos.length; i++) {
+              const repo = topRepos[i];
+              lines.push(`| ${i + 1} | ${repo.repo} | ${repo.commits} | ${repo.prs_opened} | ${repo.prs_merged} | ${repo.issues_opened} | **${repo.activity_score}** |`);
+            }
+            if (topRepos.length === 0) {
+              lines.push('| 0 | _No repositories with activity_ | 0 | 0 | 0 | 0 | 0 |');
+            }
+
+            if (top.length > 0) {
+              lines.push('');
+              lines.push('## Contributor Details');
+              lines.push('');
+              for (const c of top) {
+                lines.push(`<details><summary>@${c.login} — score ${c.activity_score}, repos ${c.repos_touched}</summary>`);
+                lines.push('');
+                lines.push(`- Commits: ${c.commits}`);
+                lines.push(`- PRs opened: ${c.prs_opened}`);
+                lines.push(`- PRs merged: ${c.prs_merged}`);
+                lines.push(`- Issues opened: ${c.issues_opened}`);
+                lines.push(`- Repositories: ${c.repositories.length > 0 ? c.repositories.join(', ') : 'none'}`);
+                lines.push('');
+                lines.push('</details>');
+                lines.push('');
+              }
+            }
+
+            lines.push('## Methodology');
+            lines.push('');
+            lines.push('- Activity score formula: `commits*1 + prs_opened*2 + prs_merged*3 + issues_opened*1`');
+            lines.push(`- Contributor filter: score >= ${minActivity}`);
+            lines.push(`- Bots included: ${includeBots ? 'yes' : 'no'}`);
+            lines.push('- Data source: GitHub Search API (commits, issues, pull requests)');
 
             const outDir = '.github/output/ospo-contributors-report';
             fs.mkdirSync(outDir, { recursive: true });
