@@ -3,6 +3,7 @@ name: Relevance Summary
 on:
   workflow_dispatch:
     inputs:
+
       close_previous:
         description: Close any previously created relevance summary issues before creating a new one
         required: false
@@ -11,6 +12,12 @@ on:
         options:
           - 'true'
           - 'false'
+
+      create_summary_issue:
+        description: Create a summary issue (if unchecked, only artifact and run summary are generated)
+        required: false
+        default: 'false'
+        type: boolean
 
 permissions:
   contents: read
@@ -259,20 +266,26 @@ jobs:
             const reportPath = process.env.RUNNER_TEMP + '/relevance-summary-report.md';
             require('fs').writeFileSync(reportPath, issueBody, 'utf8');
 
-            // ── Create the summary issue ─────────────────────────────────────
-            const summaryTitle = `[Relevance Summary] ${now.toISOString().slice(0, 10)} — ${issueEntries.length} issue(s), ${prEntries.length} PR(s) with /relevance-check`;
-
-            const created = await github.rest.issues.create({
-              owner: repoOwner,
-              repo: repoName,
-              title: summaryTitle,
-              body: issueBody,
-              labels: [SUMMARY_LABEL]
-            });
-
-            core.info(`Created summary issue #${created.data.number}: ${created.data.html_url}`);
-            core.setOutput('summary_issue_number', created.data.number);
-            core.setOutput('summary_issue_url', created.data.html_url);
+            let summaryIssueNumber = '';
+            let summaryIssueUrl = '';
+            if (context.payload.inputs.create_summary_issue === 'true') {
+              // ── Create the summary issue ───────────────────────────────
+              const summaryTitle = `[Relevance Summary] ${now.toISOString().slice(0, 10)} — ${issueEntries.length} issue(s), ${prEntries.length} PR(s) with /relevance-check`;
+              const created = await github.rest.issues.create({
+                owner: repoOwner,
+                repo: repoName,
+                title: summaryTitle,
+                body: issueBody,
+                labels: [SUMMARY_LABEL]
+              });
+              summaryIssueNumber = created.data.number;
+              summaryIssueUrl = created.data.html_url;
+              core.info(`Created summary issue #${summaryIssueNumber}: ${summaryIssueUrl}`);
+            } else {
+              core.info('Skipped creating summary issue (create_summary_issue input is false)');
+            }
+            core.setOutput('summary_issue_number', summaryIssueNumber);
+            core.setOutput('summary_issue_url', summaryIssueUrl);
             core.setOutput('report_path', reportPath);
             core.setOutput('report_date', now.toISOString().slice(0, 10));
 
@@ -286,9 +299,14 @@ jobs:
 
       - name: Print summary issue and report
         run: |
-          echo "### Relevance Summary Issue Created" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Relevance Summary Report" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Issue **#${{ steps.summary.outputs.summary_issue_number }}**: ${{ steps.summary.outputs.summary_issue_url }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "${{ steps.summary.outputs.summary_issue_url }}" ]; then
+            echo "Issue **#${{ steps.summary.outputs.summary_issue_number }}**: ${{ steps.summary.outputs.summary_issue_url }}" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "_No summary issue was created (option unchecked)._" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+          fi
           echo "---" >> "$GITHUB_STEP_SUMMARY"
           cat "${{ steps.summary.outputs.report_path }}" >> "$GITHUB_STEP_SUMMARY"
