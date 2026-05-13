@@ -1,0 +1,398 @@
+name: OSPO Contributors Report
+
+on:
+  schedule:
+    # Monthly on day 1 at 03:00 UTC
+    - cron: '0 3 1 * *'
+  workflow_dispatch:
+    inputs:
+      org:
+        description: 'GitHub organization to report on'
+        required: false
+        type: string
+      report_month:
+        description: 'Month to report in YYYY-MM format (default: previous month)'
+        required: false
+        type: string
+      top_n:
+        description: 'How many contributors to include in the markdown table'
+        required: false
+        default: '25'
+        type: string
+      include_bots:
+        description: 'Include bot accounts in the report'
+        required: false
+        default: false
+        type: boolean
+      min_activity:
+        description: 'Minimum activity score required to be included'
+        required: false
+        default: '1'
+        type: string
+      publish_issue:
+        description: 'Create a report issue in this repository'
+        required: false
+        default: true
+        type: boolean
+      close_previous:
+        description: 'Close previous OSPO report issues before creating a new one'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  contributors-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    env:
+      TARGET_ORG: ${{ github.event.inputs.org || vars.OSPO_REPORT_ORG || github.repository_owner }}
+      REPORT_MONTH_INPUT: ${{ github.event.inputs.report_month || '' }}
+      TOP_N: ${{ github.event.inputs.top_n || '25' }}
+      INCLUDE_BOTS: ${{ github.event.inputs.include_bots || 'false' }}
+      MIN_ACTIVITY: ${{ github.event.inputs.min_activity || '1' }}
+      PUBLISH_ISSUE: ${{ github.event.inputs.publish_issue || 'true' }}
+      CLOSE_PREVIOUS: ${{ github.event.inputs.close_previous || 'true' }}
+      REPORT_LABEL: ospo-contributors-report
+
+    steps:
+      - name: Generate monthly contributors report
+        id: report
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.OSPO_REPORT_TOKEN || github.token }}
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            const org = process.env.TARGET_ORG;
+            const includeBots = String(process.env.INCLUDE_BOTS).toLowerCase() === 'true';
+            const publishIssue = String(process.env.PUBLISH_ISSUE).toLowerCase() === 'true';
+            const closePrevious = String(process.env.CLOSE_PREVIOUS).toLowerCase() === 'true';
+            const minActivity = Math.max(0, parseInt(process.env.MIN_ACTIVITY || '1', 10));
+            const topN = Math.max(1, parseInt(process.env.TOP_N || '25', 10));
+            const reportLabel = process.env.REPORT_LABEL || 'ospo-contributors-report';
+
+            const now = new Date();
+            const explicitMonth = (process.env.REPORT_MONTH_INPUT || '').trim();
+
+            const toMonth = (d) => {
+              const y = d.getUTCFullYear();
+              const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+              return `${y}-${m}`;
+            };
+
+            const parseMonthRange = (monthInput) => {
+              if (monthInput) {
+                if (!/^\d{4}-\d{2}$/.test(monthInput)) {
+                  throw new Error(`Invalid report_month '${monthInput}'. Use YYYY-MM.`);
+                }
+                const [y, m] = monthInput.split('-').map(Number);
+                const start = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0));
+                const end = new Date(Date.UTC(y, m, 1, 0, 0, 0));
+                return { monthKey: monthInput, start, end };
+              }
+
+              // Default: previous calendar month in UTC
+              const startCurrent = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+              const startPrev = new Date(Date.UTC(startCurrent.getUTCFullYear(), startCurrent.getUTCMonth() - 1, 1));
+              return {
+                monthKey: toMonth(startPrev),
+                start: startPrev,
+                end: startCurrent
+              };
+            };
+
+            const { monthKey, start, end } = parseMonthRange(explicitMonth);
+            const startDate = start.toISOString().slice(0, 10);
+            const endExclusiveDate = end.toISOString().slice(0, 10);
+
+            const fmtDateUtc = (d) => d.toISOString().replace('T', ' ').replace('.000Z', ' UTC');
+
+            core.info(`Generating OSPO report for org='${org}', month='${monthKey}'`);
+
+            // Search API caps results to first 1000; record if truncated.
+            const fetchSearchItems = async (query, mode = 'issues') => {
+              const perPage = 100;
+              const maxPages = 10;
+              const items = [];
+              let totalCount = 0;
+
+              for (let page = 1; page <= maxPages; page++) {
+                let res;
+                if (mode === 'commits') {
+                  res = await github.rest.search.commits({
+                    q: query,
+                    per_page: perPage,
+                    page,
+                    headers: {
+                      accept: 'application/vnd.github.cloak-preview+json'
+                    }
+                  });
+                } else {
+                  res = await github.rest.search.issuesAndPullRequests({
+                    q: query,
+                    per_page: perPage,
+                    page
+                  });
+                }
+
+                if (page === 1) {
+                  totalCount = res.data.total_count || 0;
+                }
+
+                const pageItems = res.data.items || [];
+                items.push(...pageItems);
+
+                if (pageItems.length < perPage) break;
+              }
+
+              return {
+                items,
+                totalCount,
+                truncated: totalCount > items.length
+              };
+            };
+
+            const actorMap = new Map();
+            const ensureActor = (login) => {
+              if (!actorMap.has(login)) {
+                actorMap.set(login, {
+                  login,
+                  commits: 0,
+                  prsOpened: 0,
+                  prsMerged: 0,
+                  issuesOpened: 0,
+                  repos: new Set()
+                });
+              }
+              return actorMap.get(login);
+            };
+
+            const isBotLogin = (login) => /\[bot\]$/.test(login) || /bot/i.test(login);
+            const extractRepo = (repositoryUrl) => {
+              const parts = String(repositoryUrl || '').split('/');
+              if (parts.length < 2) return null;
+              return parts.slice(-2).join('/');
+            };
+
+            const monthRange = `${startDate}..${endExclusiveDate}`;
+            const commitsQuery = `org:${org} committer-date:${monthRange}`;
+            const prsOpenedQuery = `org:${org} is:pr created:${monthRange}`;
+            const prsMergedQuery = `org:${org} is:pr is:merged merged:${monthRange}`;
+            const issuesOpenedQuery = `org:${org} is:issue created:${monthRange}`;
+
+            core.info('Fetching commits...');
+            const commitsRes = await fetchSearchItems(commitsQuery, 'commits');
+            for (const item of commitsRes.items) {
+              const login = item.author?.login || item.commit?.author?.email || 'unknown';
+              if (!includeBots && isBotLogin(login)) continue;
+              const actor = ensureActor(login);
+              actor.commits += 1;
+              if (item.repository?.full_name) actor.repos.add(item.repository.full_name);
+            }
+
+            core.info('Fetching opened PRs...');
+            const prsOpenedRes = await fetchSearchItems(prsOpenedQuery, 'issues');
+            for (const item of prsOpenedRes.items) {
+              const login = item.user?.login || 'unknown';
+              if (!includeBots && isBotLogin(login)) continue;
+              const actor = ensureActor(login);
+              actor.prsOpened += 1;
+              const repo = extractRepo(item.repository_url);
+              if (repo) actor.repos.add(repo);
+            }
+
+            core.info('Fetching merged PRs...');
+            const prsMergedRes = await fetchSearchItems(prsMergedQuery, 'issues');
+            for (const item of prsMergedRes.items) {
+              const login = item.user?.login || 'unknown';
+              if (!includeBots && isBotLogin(login)) continue;
+              const actor = ensureActor(login);
+              actor.prsMerged += 1;
+              const repo = extractRepo(item.repository_url);
+              if (repo) actor.repos.add(repo);
+            }
+
+            core.info('Fetching opened issues...');
+            const issuesOpenedRes = await fetchSearchItems(issuesOpenedQuery, 'issues');
+            for (const item of issuesOpenedRes.items) {
+              const login = item.user?.login || 'unknown';
+              if (!includeBots && isBotLogin(login)) continue;
+              const actor = ensureActor(login);
+              actor.issuesOpened += 1;
+              const repo = extractRepo(item.repository_url);
+              if (repo) actor.repos.add(repo);
+            }
+
+            const contributors = Array.from(actorMap.values()).map((a) => {
+              const activityScore = (a.commits * 1) + (a.prsOpened * 2) + (a.prsMerged * 3) + (a.issuesOpened * 1);
+              return {
+                login: a.login,
+                commits: a.commits,
+                prs_opened: a.prsOpened,
+                prs_merged: a.prsMerged,
+                issues_opened: a.issuesOpened,
+                repos_touched: a.repos.size,
+                activity_score: activityScore,
+                repositories: Array.from(a.repos).sort()
+              };
+            });
+
+            const filtered = contributors
+              .filter((c) => c.activity_score >= minActivity)
+              .sort((a, b) => b.activity_score - a.activity_score || b.commits - a.commits || a.login.localeCompare(b.login));
+
+            const top = filtered.slice(0, topN);
+            const repoSet = new Set();
+            filtered.forEach((c) => c.repositories.forEach((r) => repoSet.add(r)));
+
+            const truncationNotes = [];
+            if (commitsRes.truncated) truncationNotes.push(`Commit search truncated (${commitsRes.items.length}/${commitsRes.totalCount}).`);
+            if (prsOpenedRes.truncated) truncationNotes.push(`Opened PR search truncated (${prsOpenedRes.items.length}/${prsOpenedRes.totalCount}).`);
+            if (prsMergedRes.truncated) truncationNotes.push(`Merged PR search truncated (${prsMergedRes.items.length}/${prsMergedRes.totalCount}).`);
+            if (issuesOpenedRes.truncated) truncationNotes.push(`Issue search truncated (${issuesOpenedRes.items.length}/${issuesOpenedRes.totalCount}).`);
+
+            const lines = [];
+            lines.push(`# OSPO Contributors Report`);
+            lines.push('');
+            lines.push(`- Organization: ${org}`);
+            lines.push(`- Reporting month: ${monthKey}`);
+            lines.push(`- Window (UTC): ${fmtDateUtc(start)} to ${fmtDateUtc(end)} (end-exclusive)`);
+            lines.push(`- Included contributors: ${filtered.length}`);
+            lines.push(`- Repositories touched: ${repoSet.size}`);
+            lines.push('');
+
+            if (truncationNotes.length > 0) {
+              lines.push('## Notes');
+              lines.push('');
+              for (const note of truncationNotes) lines.push(`- ${note}`);
+              lines.push('');
+            }
+
+            lines.push(`## Top ${top.length} Contributors`);
+            lines.push('');
+            lines.push('| Contributor | Commits | PRs Opened | PRs Merged | Issues Opened | Repos | Score |');
+            lines.push('|---|---:|---:|---:|---:|---:|---:|');
+            for (const c of top) {
+              lines.push(`| @${c.login} | ${c.commits} | ${c.prs_opened} | ${c.prs_merged} | ${c.issues_opened} | ${c.repos_touched} | ${c.activity_score} |`);
+            }
+            if (top.length === 0) {
+              lines.push('| _No contributors matched filters_ | 0 | 0 | 0 | 0 | 0 | 0 |');
+            }
+
+            const outDir = '.github/output/ospo-contributors-report';
+            fs.mkdirSync(outDir, { recursive: true });
+
+            const reportBase = `ospo-contributors-${org}-${monthKey}`;
+            const markdownPath = path.join(outDir, `${reportBase}.md`);
+            const jsonPath = path.join(outDir, `${reportBase}.json`);
+
+            const jsonPayload = {
+              generated_at: new Date().toISOString(),
+              organization: org,
+              month: monthKey,
+              window_utc: {
+                start: start.toISOString(),
+                end_exclusive: end.toISOString()
+              },
+              filters: {
+                include_bots: includeBots,
+                min_activity: minActivity,
+                top_n: topN
+              },
+              totals: {
+                contributors: filtered.length,
+                repositories_touched: repoSet.size
+              },
+              search_stats: {
+                commits: { returned: commitsRes.items.length, total_count: commitsRes.totalCount, truncated: commitsRes.truncated },
+                prs_opened: { returned: prsOpenedRes.items.length, total_count: prsOpenedRes.totalCount, truncated: prsOpenedRes.truncated },
+                prs_merged: { returned: prsMergedRes.items.length, total_count: prsMergedRes.totalCount, truncated: prsMergedRes.truncated },
+                issues_opened: { returned: issuesOpenedRes.items.length, total_count: issuesOpenedRes.totalCount, truncated: issuesOpenedRes.truncated }
+              },
+              contributors: filtered
+            };
+
+            fs.writeFileSync(markdownPath, lines.join('\n') + '\n');
+            fs.writeFileSync(jsonPath, JSON.stringify(jsonPayload, null, 2));
+
+            core.setOutput('org', org);
+            core.setOutput('month', monthKey);
+            core.setOutput('markdown_path', markdownPath);
+            core.setOutput('json_path', jsonPath);
+            core.setOutput('contributors', String(filtered.length));
+
+            let issueUrl = '';
+            if (publishIssue) {
+              try {
+                await github.rest.issues.getLabel({ owner: context.repo.owner, repo: context.repo.repo, name: reportLabel });
+              } catch (e) {
+                if (e.status === 404) {
+                  await github.rest.issues.createLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    name: reportLabel,
+                    color: '1d76db',
+                    description: 'Auto-generated monthly OSPO contributors report'
+                  });
+                } else {
+                  throw e;
+                }
+              }
+
+              if (closePrevious) {
+                const openReportIssues = await github.paginate(github.rest.issues.listForRepo, {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  labels: reportLabel,
+                  state: 'open',
+                  per_page: 100
+                });
+                for (const issue of openReportIssues) {
+                  await github.rest.issues.update({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issue.number,
+                    state: 'closed'
+                  });
+                }
+              }
+
+              const issueTitle = `[OSPO Contributors Report] ${org} - ${monthKey}`;
+              const issueBody = `${lines.join('\n')}\n\n---\n_This issue was auto-generated by the OSPO Contributors Report workflow._`;
+              const created = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: issueTitle,
+                body: issueBody,
+                labels: [reportLabel]
+              });
+              issueUrl = created.data.html_url;
+              core.setOutput('issue_url', issueUrl);
+            }
+
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, [
+              '## OSPO Contributors Report',
+              '',
+              `- Organization: ${org}`,
+              `- Month: ${monthKey}`,
+              `- Contributors: ${filtered.length}`,
+              `- Repositories touched: ${repoSet.size}`,
+              issueUrl ? `- Issue: ${issueUrl}` : '- Issue: disabled',
+              '',
+              `Artifacts: ${markdownPath}, ${jsonPath}`
+            ].join('\n') + '\n');
+
+      - name: Upload contributors report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ospo-contributors-report-${{ steps.report.outputs.org }}-${{ steps.report.outputs.month }}-${{ github.run_number }}
+          path: |
+            ${{ steps.report.outputs.markdown_path }}
+            ${{ steps.report.outputs.json_path }}
+          retention-days: 90
