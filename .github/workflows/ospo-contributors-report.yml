@@ -107,11 +107,44 @@ jobs:
               };
             };
 
+
+            // Calculate IST window: 1st 00:00:00 IST to last day 23:59:59 IST
+            // startIST: 1st of month 00:00:00 IST
+            // endIST: last day of month 23:59:59 IST
+            const getISTWindow = (monthInput) => {
+              let y, m;
+              if (monthInput) {
+                [y, m] = monthInput.split('-').map(Number);
+              } else {
+                const nowIST = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+                y = nowIST.getFullYear();
+                m = nowIST.getMonth();
+                if (nowIST.getDate() === 1) {
+                  m = m - 1;
+                  if (m < 0) { m = 11; y = y - 1; }
+                }
+                m = m + 1; // 1-based
+              }
+              // JS Date months are 0-based
+              const startIST = new Date(Date.UTC(y, m - 1, 1, 18, 30, 0)); // 00:00:00 IST
+              // Find last day of month
+              const lastDay = new Date(Date.UTC(y, m, 0, 18, 29, 59)); // 23:59:59 IST
+              return { startIST, endIST: lastDay };
+            };
+
             const { monthKey, start, end } = parseMonthRange(explicitMonth);
             const startDate = start.toISOString().slice(0, 10);
             const endExclusiveDate = end.toISOString().slice(0, 10);
+            const { startIST, endIST } = getISTWindow(monthKey);
 
-            const fmtDateUtc = (d) => d.toISOString().replace('T', ' ').replace('.000Z', ' UTC');
+            const fmtDateIST = (d) => {
+              const dt = typeof d === 'string' ? new Date(d) : d;
+              return dt.toLocaleString('en-IN', {
+                timeZone: 'Asia/Kolkata', hour12: false,
+                year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit', second: '2-digit'
+              }) + ' IST';
+            };
 
             core.info(`Generating OSPO report for org='${org}', month='${monthKey}'`);
 
@@ -316,7 +349,7 @@ jobs:
             lines.push('');
             lines.push(`- 🏢 Organization: ${org}`);
             lines.push(`- 🗓️ Reporting month: ${monthKey}`);
-            lines.push(`- 🕒 Window (UTC): ${fmtDateUtc(start)} to ${fmtDateUtc(end)} (end-exclusive)`);
+            lines.push(`- 🕒 Window (IST): ${fmtDateIST(startIST)} to ${fmtDateIST(endIST)}`);
             lines.push(`- 👥 Included contributors: ${filtered.length}`);
             lines.push(`- 📚 Repositories touched: ${repoSet.size}`);
             lines.push('');
@@ -404,9 +437,9 @@ jobs:
               generated_at: new Date().toISOString(),
               organization: org,
               month: monthKey,
-              window_utc: {
-                start: start.toISOString(),
-                end_exclusive: end.toISOString()
+              window_ist: {
+                start: fmtDateIST(startIST),
+                end: fmtDateIST(endIST)
               },
               filters: {
                 include_bots: includeBots,
@@ -485,7 +518,20 @@ jobs:
             }
 
             // Mirror the full report in the Actions run summary, then append run-specific links.
+            // Add IST time to the summary output
+            const toIST = (d) => {
+              // Format as 'YYYY-MM-DD HH:mm:ss IST' in Asia/Kolkata
+              const dt = typeof d === 'string' ? new Date(d) : d;
+              return dt.toLocaleString('en-IN', {
+                timeZone: 'Asia/Kolkata', hour12: false,
+                year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit', second: '2-digit'
+              }) + ' IST';
+            };
+            const istNow = toIST(now);
             const summaryLines = [
+              `🕒 **Report generated at:** ${istNow}`,
+              '',
               ...lines,
               '',
               '---',
