@@ -310,39 +310,39 @@ jobs:
             if (issuesOpenedRes.truncated) truncationNotes.push(`Issue search truncated (${issuesOpenedRes.items.length}/${issuesOpenedRes.totalCount}).`);
 
             const lines = [];
-            lines.push(`# OSPO Contributors Report`);
+            lines.push(`# 📊 OSPO Contributors Report`);
             lines.push('');
-            lines.push(`> Monthly contributor activity view for **${org}**`);
+            lines.push(`> 🚀 Monthly contributor activity view for **${org}**`);
             lines.push('');
-            lines.push(`- Organization: ${org}`);
-            lines.push(`- Reporting month: ${monthKey}`);
-            lines.push(`- Window (UTC): ${fmtDateUtc(start)} to ${fmtDateUtc(end)} (end-exclusive)`);
-            lines.push(`- Included contributors: ${filtered.length}`);
-            lines.push(`- Repositories touched: ${repoSet.size}`);
+            lines.push(`- 🏢 Organization: ${org}`);
+            lines.push(`- 🗓️ Reporting month: ${monthKey}`);
+            lines.push(`- 🕒 Window (UTC): ${fmtDateUtc(start)} to ${fmtDateUtc(end)} (end-exclusive)`);
+            lines.push(`- 👥 Included contributors: ${filtered.length}`);
+            lines.push(`- 📚 Repositories touched: ${repoSet.size}`);
             lines.push('');
 
-            lines.push('## Executive Snapshot');
+            lines.push('## 🧭 Executive Snapshot');
             lines.push('');
             lines.push('| Metric | Value |');
             lines.push('|---|---:|');
-            lines.push(`| Contributors | **${filtered.length}** |`);
-            lines.push(`| Repositories touched | **${repoSet.size}** |`);
-            lines.push(`| Commits | **${totalCommits}** |`);
-            lines.push(`| PRs opened | **${totalPrsOpened}** |`);
-            lines.push(`| PRs merged | **${totalPrsMerged}** |`);
-            lines.push(`| Issues opened | **${totalIssuesOpened}** |`);
-            lines.push(`| Total activity score | **${totalActivityScore}** |`);
-            lines.push(`| Average score per contributor | **${avgScore}** |`);
+            lines.push(`| 👥 Contributors | **${filtered.length}** |`);
+            lines.push(`| 📚 Repositories touched | **${repoSet.size}** |`);
+            lines.push(`| 🧾 Commits | **${totalCommits}** |`);
+            lines.push(`| 🔀 PRs opened | **${totalPrsOpened}** |`);
+            lines.push(`| ✅ PRs merged | **${totalPrsMerged}** |`);
+            lines.push(`| 🐞 Issues opened | **${totalIssuesOpened}** |`);
+            lines.push(`| ⭐ Total activity score | **${totalActivityScore}** |`);
+            lines.push(`| 📈 Average score per contributor | **${avgScore}** |`);
             lines.push('');
 
             if (truncationNotes.length > 0) {
-              lines.push('## Notes');
+              lines.push('## ⚠️ Notes');
               lines.push('');
               for (const note of truncationNotes) lines.push(`- ${note}`);
               lines.push('');
             }
 
-            lines.push(`## Top ${top.length} Contributors`);
+            lines.push(`## 🏆 Top ${top.length} Contributors`);
             lines.push('');
             lines.push('| Rank | Contributor | Commits | PRs Opened | PRs Merged | Issues Opened | Repos | Score |');
             lines.push('|---:|---|---:|---:|---:|---:|---:|---:|');
@@ -356,7 +356,7 @@ jobs:
             }
 
             lines.push('');
-            lines.push('## Top Active Repositories');
+            lines.push('## 📦 Top Active Repositories');
             lines.push('');
             lines.push('| Rank | Repository | Commits | PRs Opened | PRs Merged | Issues Opened | Score |');
             lines.push('|---:|---|---:|---:|---:|---:|---:|');
@@ -370,23 +370,23 @@ jobs:
 
             if (top.length > 0) {
               lines.push('');
-              lines.push('## Contributor Details');
+              lines.push('## 🔎 Contributor Details');
               lines.push('');
               for (const c of top) {
-                lines.push(`<details><summary>@${c.login} — score ${c.activity_score}, repos ${c.repos_touched}</summary>`);
+                lines.push(`<details><summary>👤 @${c.login} — score ${c.activity_score}, repos ${c.repos_touched}</summary>`);
                 lines.push('');
-                lines.push(`- Commits: ${c.commits}`);
-                lines.push(`- PRs opened: ${c.prs_opened}`);
-                lines.push(`- PRs merged: ${c.prs_merged}`);
-                lines.push(`- Issues opened: ${c.issues_opened}`);
-                lines.push(`- Repositories: ${c.repositories.length > 0 ? c.repositories.join(', ') : 'none'}`);
+                lines.push(`- 🧾 Commits: ${c.commits}`);
+                lines.push(`- 🔀 PRs opened: ${c.prs_opened}`);
+                lines.push(`- ✅ PRs merged: ${c.prs_merged}`);
+                lines.push(`- 🐞 Issues opened: ${c.issues_opened}`);
+                lines.push(`- 📚 Repositories: ${c.repositories.length > 0 ? c.repositories.join(', ') : 'none'}`);
                 lines.push('');
                 lines.push('</details>');
                 lines.push('');
               }
             }
 
-            lines.push('## Methodology');
+            lines.push('## 🧠 Methodology');
             lines.push('');
             lines.push('- Activity score formula: `commits*1 + prs_opened*2 + prs_merged*3 + issues_opened*1`');
             lines.push(`- Contributor filter: score >= ${minActivity}`);
@@ -485,15 +485,15 @@ jobs:
             }
 
             fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, [
-              '## OSPO Contributors Report',
+              '## 📊 OSPO Contributors Report',
               '',
-              `- Organization: ${org}`,
-              `- Month: ${monthKey}`,
-              `- Contributors: ${filtered.length}`,
-              `- Repositories touched: ${repoSet.size}`,
-              issueUrl ? `- Issue: ${issueUrl}` : '- Issue: disabled',
+              `- 🏢 Organization: ${org}`,
+              `- 🗓️ Month: ${monthKey}`,
+              `- 👥 Contributors: ${filtered.length}`,
+              `- 📚 Repositories touched: ${repoSet.size}`,
+              issueUrl ? `- 🧾 Issue: ${issueUrl}` : '- 🧾 Issue: disabled',
               '',
-              `Artifacts: ${markdownPath}, ${jsonPath}`
+              `📎 Artifacts: ${markdownPath}, ${jsonPath}`
             ].join('\n') + '\n');
 
       - name: Upload contributors report artifact
