@@ -137,12 +137,16 @@ jobs:
             const { startIST, endIST } = getISTWindow(monthKey);
 
             const fmtDateIST = (d) => {
+              // Deterministic IST formatter to avoid locale oddities like 24:00:00
               const dt = typeof d === 'string' ? new Date(d) : d;
-              return dt.toLocaleString('en-IN', {
-                timeZone: 'Asia/Kolkata', hour12: false,
-                year: 'numeric', month: '2-digit', day: '2-digit',
-                hour: '2-digit', minute: '2-digit', second: '2-digit'
-              }) + ' IST';
+              const ist = new Date(dt.getTime() + (5.5 * 60 * 60 * 1000));
+              const dd = String(ist.getUTCDate()).padStart(2, '0');
+              const mm = String(ist.getUTCMonth() + 1).padStart(2, '0');
+              const yyyy = ist.getUTCFullYear();
+              const hh = String(ist.getUTCHours()).padStart(2, '0');
+              const min = String(ist.getUTCMinutes()).padStart(2, '0');
+              const ss = String(ist.getUTCSeconds()).padStart(2, '0');
+              return `${dd}/${mm}/${yyyy}, ${hh}:${min}:${ss} IST`;
             };
 
             core.info(`Generating OSPO report for org='${org}', month='${monthKey}'`);
@@ -519,17 +523,7 @@ jobs:
             }
 
             // Mirror the full report in the Actions run summary, then append run-specific links.
-            // Add IST time to the summary output
-            const toIST = (d) => {
-              // Format as 'YYYY-MM-DD HH:mm:ss IST' in Asia/Kolkata
-              const dt = typeof d === 'string' ? new Date(d) : d;
-              return dt.toLocaleString('en-IN', {
-                timeZone: 'Asia/Kolkata', hour12: false,
-                year: 'numeric', month: '2-digit', day: '2-digit',
-                hour: '2-digit', minute: '2-digit', second: '2-digit'
-              }) + ' IST';
-            };
-            const istNow = toIST(now);
+            const istNow = fmtDateIST(now);
             const summaryLines = [
               `🕒 **Report generated at:** ${istNow}`,
               '',
