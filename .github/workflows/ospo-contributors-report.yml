@@ -433,7 +433,7 @@ jobs:
             const outDir = '.github/output/ospo-contributors-report';
             fs.mkdirSync(outDir, { recursive: true });
 
-            const reportBase = `ospo-contributors-${org}-${monthKey}`;
+            const reportBase = `ospo-contributors-${org}`;
             const markdownFilename = `${reportBase}.md`;
             const jsonFilename = `${reportBase}.json`;
             const markdownPath = path.join(outDir, markdownFilename);
@@ -542,7 +542,7 @@ jobs:
       - name: Upload contributors report artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ospo-contributors-report-${{ steps.report.outputs.org }}-${{ steps.report.outputs.month }}-${{ github.run_number }}
+          name: ospo-contributors-report-${{ steps.report.outputs.org }}-${{ github.run_number }}
           path: |
             ${{ steps.report.outputs.markdown_path }}
             ${{ steps.report.outputs.json_path }}
