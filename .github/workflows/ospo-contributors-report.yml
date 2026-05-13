@@ -484,17 +484,18 @@ jobs:
               core.setOutput('issue_url', issueUrl);
             }
 
-            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, [
-              '## 📊 OSPO Contributors Report',
+            // Mirror the full report in the Actions run summary, then append run-specific links.
+            const summaryLines = [
+              ...lines,
               '',
-              `- 🏢 Organization: ${org}`,
-              `- 🗓️ Month: ${monthKey}`,
-              `- 👥 Contributors: ${filtered.length}`,
-              `- 📚 Repositories touched: ${repoSet.size}`,
+              '---',
+              '',
+              '## 🔗 Run Outputs',
+              '',
               issueUrl ? `- 🧾 Issue: ${issueUrl}` : '- 🧾 Issue: disabled',
-              '',
-              `📎 Artifacts: ${markdownPath}, ${jsonPath}`
-            ].join('\n') + '\n');
+              `- 📎 Artifact files: ${markdownPath}, ${jsonPath}`
+            ];
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summaryLines.join('\n') + '\n');
 
       - name: Upload contributors report artifact
         uses: actions/upload-artifact@v4
