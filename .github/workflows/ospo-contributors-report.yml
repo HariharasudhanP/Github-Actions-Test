@@ -124,7 +124,8 @@ jobs:
                 // previous month
               }
               // JS Date months are 0-based
-              const startIST = new Date(Date.UTC(y, m - 1, 1, 18, 30, 0)); // 1st 00:00:00 IST
+              // 1st 00:00:00 IST == previous UTC day 18:30:00
+              const startIST = new Date(Date.UTC(y, m - 1, 0, 18, 30, 0));
               // Find last day of month
               const lastDayNum = new Date(y, m, 0).getDate();
               const endIST = new Date(Date.UTC(y, m - 1, lastDayNum, 18, 29, 59)); // last day 23:59:59 IST
