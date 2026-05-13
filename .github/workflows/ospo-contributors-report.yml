@@ -116,20 +116,19 @@ jobs:
               if (monthInput) {
                 [y, m] = monthInput.split('-').map(Number);
               } else {
+                // Default to previous month in IST
                 const nowIST = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
                 y = nowIST.getFullYear();
-                m = nowIST.getMonth();
-                if (nowIST.getDate() === 1) {
-                  m = m - 1;
-                  if (m < 0) { m = 11; y = y - 1; }
-                }
-                m = m + 1; // 1-based
+                m = nowIST.getMonth(); // 0-based
+                if (m === 0) { y = y - 1; m = 12; }
+                // previous month
               }
               // JS Date months are 0-based
-              const startIST = new Date(Date.UTC(y, m - 1, 1, 18, 30, 0)); // 00:00:00 IST
+              const startIST = new Date(Date.UTC(y, m - 1, 1, 18, 30, 0)); // 1st 00:00:00 IST
               // Find last day of month
-              const lastDay = new Date(Date.UTC(y, m, 0, 18, 29, 59)); // 23:59:59 IST
-              return { startIST, endIST: lastDay };
+              const lastDayNum = new Date(y, m, 0).getDate();
+              const endIST = new Date(Date.UTC(y, m - 1, lastDayNum, 18, 29, 59)); // last day 23:59:59 IST
+              return { startIST, endIST };
             };
 
             const { monthKey, start, end } = parseMonthRange(explicitMonth);
@@ -430,8 +429,10 @@ jobs:
             fs.mkdirSync(outDir, { recursive: true });
 
             const reportBase = `ospo-contributors-${org}-${monthKey}`;
-            const markdownPath = path.join(outDir, `${reportBase}.md`);
-            const jsonPath = path.join(outDir, `${reportBase}.json`);
+            const markdownFilename = `${reportBase}.md`;
+            const jsonFilename = `${reportBase}.json`;
+            const markdownPath = path.join(outDir, markdownFilename);
+            const jsonPath = path.join(outDir, jsonFilename);
 
             const jsonPayload = {
               generated_at: new Date().toISOString(),
@@ -539,7 +540,7 @@ jobs:
               '## 🔗 Run Outputs',
               '',
               issueUrl ? `- 🧾 Issue: ${issueUrl}` : '- 🧾 Issue: disabled',
-              `- 📎 Artifact files: ${markdownPath}, ${jsonPath}`
+              // No artifact file names in summary
             ];
             fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summaryLines.join('\n') + '\n');
 
