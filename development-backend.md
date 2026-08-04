@@ -1,0 +1,3 @@
+No backend component is in scope for this project (React SPA only; no backend/API/database/infra). As the `development-backend` worker, I have no code or tests to implement without inventing non-existent contracts/endpoints, which would violate the scope and constraints.
+
+If you later decide you want a backend slice (e.g., `/api/skills` to load skills from a JSON file, contact form submission, or analytics), tell me the intended stack (Node/Python/etc.) and the exact API contract so I can implement it.

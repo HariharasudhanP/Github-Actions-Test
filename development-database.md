@@ -1,0 +1,3 @@
+This project is explicitly a React SPA with **no backend and no database in scope**. Implementing a persistence layer (schema/migrations/seeds/data-access/tests) would require inventing storage decisions and a data model, which would violate the scope/constraints.
+
+If you later add a backend or choose to persist skills/content (e.g., SQLite/Postgres + API, or a simple JSON-backed “DB”), share `data-model.md` and `storage-decisions.md` (or the intended datastore + access patterns), and I’ll implement the persistence layer accordingly.

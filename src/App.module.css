@@ -1,0 +1,56 @@
+.app {
+  min-height: 100vh;
+  background: radial-gradient(
+      900px 600px at 20% 12%,
+      color-mix(in srgb, var(--color-accent) 12%, transparent),
+      transparent 60%
+    ),
+    radial-gradient(
+      900px 600px at 85% 30%,
+      color-mix(in srgb, var(--color-accent-2) 10%, transparent),
+      transparent 65%
+    ),
+    var(--color-bg);
+  color: var(--color-fg);
+}
+
+.skipLink {
+  position: absolute;
+  left: var(--space-3);
+  top: var(--space-3);
+  z-index: 999;
+  padding: 0.6rem 0.8rem;
+  border-radius: var(--radius-2);
+  background: var(--color-panel);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-2);
+  color: var(--color-fg);
+  transform: translateY(-160%);
+  transition: transform 140ms ease;
+}
+
+.skipLink:focus {
+  transform: translateY(0);
+  outline: none;
+}
+
+.main {
+  padding: var(--space-6) var(--space-4) var(--space-7);
+}
+
+.layout {
+  margin: 0 auto;
+  max-width: 980px;
+  display: grid;
+  gap: var(--space-6);
+}
+
+@media (max-width: 720px) {
+  .main {
+    padding: var(--space-5) var(--space-3) var(--space-6);
+  }
+
+  .layout {
+    gap: var(--space-5);
+  }
+}

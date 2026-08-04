@@ -1,0 +1,73 @@
+:root {
+  /* Palette — minimal, “graphite + chalk + copper” */
+  --color-bg: #0f1115;
+  --color-panel: #131723;
+  --color-panel-2: #0c0f16;
+  --color-fg: #eef0f5;
+  --color-muted: #b8becb;
+  --color-subtle: #8a93a6;
+  --color-border: rgba(238, 240, 245, 0.14);
+
+  --color-accent: #c9775a; /* copper */
+  --color-accent-2: #74b6a7; /* sea-glass */
+  --color-accent-ink: #0f1115;
+
+  /* Type */
+  --font-body: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica,
+    Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  --font-display: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia,
+    serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+
+  --text-1: 0.95rem; /* body */
+  --text-2: 1.05rem; /* lead */
+  --text-3: 1.25rem; /* section title */
+  --text-4: 1.85rem; /* page title */
+
+  --lh-tight: 1.15;
+  --lh-normal: 1.5;
+
+  /* Spacing (4px grid-ish) */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+
+  /* Radius / shadows */
+  --radius-1: 10px;
+  --radius-2: 16px;
+  --shadow-1: 0 10px 24px rgba(0, 0, 0, 0.32);
+  --shadow-2: 0 18px 44px rgba(0, 0, 0, 0.42);
+
+  /* Control sizing */
+  --control-h: 38px;
+  --control-pad-x: 0.9rem;
+
+  /* Focus */
+  --focus-ring: 0 0 0 3px rgba(201, 119, 90, 0.35);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --color-bg: #fbfbfd;
+    --color-panel: #ffffff;
+    --color-panel-2: #f4f6fb;
+    --color-fg: #11131a;
+    --color-muted: #3d4454;
+    --color-subtle: #6a738a;
+    --color-border: rgba(17, 19, 26, 0.12);
+
+    --color-accent: #b2593e;
+    --color-accent-2: #2d8e7c;
+    --color-accent-ink: #fbfbfd;
+
+    --shadow-1: 0 12px 28px rgba(17, 19, 26, 0.12);
+    --shadow-2: 0 18px 46px rgba(17, 19, 26, 0.16);
+
+    --focus-ring: 0 0 0 3px rgba(178, 89, 62, 0.26);
+  }
+}

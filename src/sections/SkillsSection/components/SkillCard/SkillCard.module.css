@@ -1,0 +1,47 @@
+.card {
+  border-radius: var(--radius-2);
+  border: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-panel) 84%, transparent);
+  padding: var(--space-4);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset;
+}
+
+.topRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.name {
+  margin: 0;
+  font-size: 1.02rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.level {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  padding: 0.2rem 0.5rem;
+  color: var(--color-muted);
+  background: color-mix(in srgb, var(--color-bg) 55%, transparent);
+  flex: none;
+}
+
+.level[data-level="Core"] {
+  border-color: color-mix(in srgb, var(--color-accent) 36%, var(--color-border));
+}
+
+.level[data-level="Strong"] {
+  border-color: color-mix(in srgb, var(--color-accent-2) 36%, var(--color-border));
+}
+
+.note {
+  margin: 0;
+  color: var(--color-subtle);
+  line-height: 1.45;
+}
